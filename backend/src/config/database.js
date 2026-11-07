@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+﻿import mongoose from "mongoose";
 
 export async function connectDatabase(uri = process.env.MONGODB_URI) {
   if (!uri) {

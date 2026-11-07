@@ -1,40 +1,44 @@
 # PayLeak
 
-PayLeak helps teams review payment fees, invoices, and payment routes.
+PayLeak is a payment analytics and fee leakage monitoring platform.
 
-## Project structure
+## Run the demo
 
-- `frontend/` — React application
-- `backend/` — Express API and application services
-- `ai-service/` — AI prompt and response-generation modules
-- `docs/` — API, data model, team, and demo documentation
-- `tests/` — project-level tests
+```sh
+npm install
+npm install --prefix frontend
+npm install --prefix backend
+npm run dev
+```
 
-## Getting started
+The frontend opens at Vite's local URL. Sign in with the prefilled demo account,
+then select **Continue with sample data** on the PayPal setup screen. All accounts,
+payments, invoices, route estimates, and AI responses in this prototype are
+fictional; it does not connect to PayPal or send money or email.
 
-1. Install the root and application dependencies:
+The dashboard links to invoices, money leak analysis, route optimizer, AI assistant,
+notifications, and settings. Create an invoice to try the local draft extraction,
+preview, and confirmation flow. Use Settings to reset browser-local demo records.
 
-   ```sh
-   npm install
-   npm install --prefix frontend
-   npm install --prefix backend
-   ```
+## Folder structure
 
-2. Copy `backend/.env.example` to `backend/.env` and add your local configuration.
-   The frontend environment file is `frontend/.env`.
-3. Start the frontend and backend together:
+- `frontend/` — React app and local demo experiences
+- `backend/` — Express API and business logic
+- `ai-service/` — AI prompts and extractors
+- `docs/` — API and schema docs
+- `tests/` — test folder
 
-   ```sh
-   npm run dev
-   ```
+The frontend uses `VITE_API_MODE=demo` by default. Set `VITE_API_MODE=api` and
+configure `VITE_API_BASE_URL` in `frontend/.env` to opt into available backend
+endpoints. Until those endpoints are available, service functions use clearly
+identified demo fixtures.
 
-The frontend runs on Vite's default development port. The API defaults to port
-`5000`; its health endpoint is `GET /api/health`.
+## Why controllers and services are separate
 
-## Team ownership
+When the frontend requests a route comparison:
+- `routeController.js` receives the request.
+- `routeOptimizationService.js` calculates the routes.
+- `RouteQuote.js` saves the result.
+- The controller returns JSON to the React UI.
 
-- Frontend: Member 1
-- Backend: Members 2 & 3
-- AI service: Member 4
-
-See the files in `docs/` for the working contracts and team task outline.
+This keeps HTTP code, business logic, and storage concerns separate.
