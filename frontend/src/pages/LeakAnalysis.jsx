@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BadgeCheck, CircleHelp, ExternalLink, Info, RefreshCw, Sparkles } from "lucide-react";
@@ -292,8 +291,4 @@ export default function LeakAnalysis() {
       )}
     </div>
   );
-=======
-export default function LeakAnalysis() {
-  return <main><h1>Leak analysis</h1><p>Payment fee analysis will appear here.</p></main>;
->>>>>>> dcb877a2283b466bc7b3821e56fd18eed33a0452
 }

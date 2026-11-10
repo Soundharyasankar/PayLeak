@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Activity, ArrowRight, CircleDollarSign, FilePlus2, RefreshCw, Wallet } from "lucide-react";
@@ -100,8 +98,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-=======
-export default function Dashboard() {
-  return <main><h1>PayLeak dashboard</h1><p>Your payment insights will appear here.</p></main>;
->>>>>>> dcb877a2283b466bc7b3821e56fd18eed33a0452
 }
