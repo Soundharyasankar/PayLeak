@@ -5,7 +5,7 @@ import { Invoice } from "../models/Invoice.ts";
 import { AppError } from "../utils/errors.js";
 import { ensureAssistantInvoiceIndex } from "./invoiceIndexService.js";
 import { createPaypalInvoice, publishLocalInvoiceToPaypal, sendPaypalInvoice, updatePaypalInvoiceDraft } from "./paypalInvoiceService.js";
-import { calculateInvoiceLineItemTotal, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
+import { calculateInvoiceLineItemTotal, normalizeInvoiceLineItems, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
 
 export async function listInvoices(userId: string) {
   const invoices = await Invoice.find({ userId }).sort({ createdAt: -1 }).lean();
@@ -22,9 +22,11 @@ export async function createInvoice(userId: string, input: {
     if (!client) throw new AppError(404, "Client not found.", "CLIENT_NOT_FOUND");
     clientId = client._id;
   }
-  const amount = input.lineItems ? calculateInvoiceLineItemTotal(input.lineItems, input.currency) : input.amount;
+  const lineItems = normalizeInvoiceLineItems(input.lineItems, input.project, input.description, input.amount, input.currency);
+  const amount = calculateInvoiceLineItemTotal(lineItems, input.currency);
   const invoice = await createPaypalInvoice(userId, {
     ...input,
+    lineItems,
     amount,
     clientId: clientId ? String(clientId) : undefined,
   }, requestId);
@@ -41,8 +43,11 @@ export async function createLocalInvoiceDraft(userId: string, input: {
     if (!client) throw new AppError(404, "Client not found.", "CLIENT_NOT_FOUND");
     clientId = client._id;
   }
-  const amount = input.lineItems ? calculateInvoiceLineItemTotal(input.lineItems, input.currency) : input.amount;
+  const lineItems = normalizeInvoiceLineItems(input.lineItems, input.project, input.description, input.amount, input.currency);
+  const amount = calculateInvoiceLineItemTotal(lineItems, input.currency);
   const { assistantSessionId, date, due, ...fields } = input;
+  fields.lineItems = lineItems;
+  if (!fields.services?.length) fields.services = lineItems.map(({ description }) => description);
   fields.amount = amount;
   await ensureAssistantInvoiceIndex();
   const invoice = await Invoice.findOneAndUpdate(
@@ -126,17 +131,30 @@ export async function updateInvoice(userId: string, id: string, input: Partial<{
   const fields: Record<string, unknown> = { ...input };
   if (input.lineItems) {
     const currency = input.currency ?? existing.currency;
-    const total = calculateInvoiceLineItemTotal(input.lineItems, currency);
+    const lineItems = normalizeInvoiceLineItems(input.lineItems, input.project ?? existing.project, input.description ?? existing.description, input.amount ?? existing.amount, currency);
+    const total = calculateInvoiceLineItemTotal(lineItems, currency);
     fields.amount = total;
-    fields.services = input.lineItems.map(({ description }) => description);
+    fields.lineItems = lineItems;
+    fields.services = lineItems.map(({ description }) => description);
     fields.description = synchronizeItemizedDescription(
       input.description ?? existing.description,
       input.project ?? existing.project,
       existing.lineItems,
-      input.lineItems,
+      lineItems,
     );
   } else if (input.amount && existing.lineItems.length > 0 && !new Decimal(input.amount).eq(existing.amount)) {
     throw new AppError(422, "Update the line item amounts instead of changing an itemized invoice total directly.", "INVOICE_LINE_ITEMS_REQUIRED");
+  } else if (!existing.lineItems.length) {
+    const lineItems = normalizeInvoiceLineItems(
+      undefined,
+      input.project ?? existing.project,
+      input.description ?? existing.description,
+      input.amount ?? existing.amount,
+      input.currency ?? existing.currency,
+    );
+    fields.lineItems = lineItems;
+    fields.services = existing.services.length ? existing.services : lineItems.map(({ description }) => description);
+    fields.amount = calculateInvoiceLineItemTotal(lineItems, input.currency ?? existing.currency);
   }
   if (input.date) fields.invoiceDate = input.date;
   if (input.due) fields.dueDate = input.due;

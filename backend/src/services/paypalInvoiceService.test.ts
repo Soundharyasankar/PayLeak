@@ -124,9 +124,9 @@ test("builds a single-currency PayPal invoice payload from validated invoice fie
   assert.equal(inrPayload.detail.currency_code, "INR");
   assert.deepEqual(inrPayload.items[0], {
     name: "Website Development",
-    description: "Website Development\n- Frontend Development\n- Backend Development\n- Deployment",
+    description: "Website Development",
     quantity: "1",
-    unit_amount: { currency_code: "INR", value: "50000" },
+    unit_amount: { currency_code: "INR", value: "50000.00" },
   });
 
   const itemizedPayload = buildPaypalInvoicePayload({
@@ -168,6 +168,151 @@ test("builds a single-currency PayPal invoice payload from validated invoice fie
   }), (error: unknown) => error instanceof Error
     && "code" in error
     && error.code === "INVOICE_LINE_ITEM_TOTAL_MISMATCH");
+});
+
+test("turns an empty legacy line-item array into one priced project item", async () => {
+  const { buildPaypalInvoicePayload } = await import("./paypalInvoiceService.js");
+  const payload = buildPaypalInvoicePayload({
+    client: "Anitha",
+    email: "client-us415@business.example.com",
+    project: "banking website",
+    lineItems: [],
+    amount: "500",
+    currency: "USD",
+    description: "banking website",
+    date: new Date("2026-11-10T00:00:00.000Z"),
+    due: new Date("2026-11-12T00:00:00.000Z"),
+  });
+
+  assert.deepEqual(payload.items, [{
+    name: "Banking website development",
+    description: "Banking website development",
+    quantity: "1",
+    unit_amount: { currency_code: "USD", value: "500.00" },
+  }]);
+  assert.equal(payload.items.reduce((total, item) => total + Number(item.unit_amount.value), 0), 500);
+});
+
+test("rejects an unitemized invoice without a usable project or service description", async () => {
+  const { buildPaypalInvoicePayload } = await import("./paypalInvoiceService.js");
+  assert.throws(() => buildPaypalInvoicePayload({
+    client: "Jordan Lee",
+    email: "jordan@example.com",
+    lineItems: [],
+    amount: "200.00",
+    currency: "USD",
+    description: " ",
+    date: new Date("2026-11-09T00:00:00.000Z"),
+    due: new Date("2026-11-24T00:00:00.000Z"),
+  }), (error: unknown) => error instanceof Error
+    && "code" in error
+    && error.code === "INVOICE_LINE_ITEM_DESCRIPTION_REQUIRED");
+});
+
+test("retries a saved legacy draft with empty line items using a persisted priced PayPal item", async (context) => {
+  const [{ User }, { Invoice }, { env }, { clearPaypalTokenCache }, { publishLocalInvoiceToPaypal }] = await Promise.all([
+    import("../models/User.ts"),
+    import("../models/Invoice.ts"),
+    import("../config/env.js"),
+    import("./paypalClient.js"),
+    import("./paypalInvoiceService.js"),
+  ]);
+  const ownerId = "507f1f77bcf86cd799439012";
+  const draftId = "507f1f77bcf86cd799439011";
+  const previousOwnerId = env.PAYPAL_ACCOUNT_OWNER_USER_ID;
+  env.PAYPAL_ACCOUNT_OWNER_USER_ID = ownerId;
+  context.after(() => { env.PAYPAL_ACCOUNT_OWNER_USER_ID = previousOwnerId; });
+
+  const draft = {
+    _id: draftId,
+    clientId: null,
+    client: "Anitha",
+    email: "client-us415@business.example.com",
+    project: "banking website",
+    services: [] as string[],
+    lineItems: [] as Array<{ description: string; amount: string }>,
+    amount: "500.00",
+    currency: "USD",
+    description: "banking website",
+    invoiceDate: new Date("2026-11-10T00:00:00.000Z"),
+    dueDate: new Date("2026-11-12T00:00:00.000Z"),
+    status: "Draft",
+    source: "payleak",
+    paypalRequestId: "ab2e1533-8526-4d7a-8e54-37d4800ec987",
+    set(key: string, value: unknown) { Object.assign(this, { [key]: value }); },
+    async save() {},
+  };
+  let savedInvoice: Record<string, unknown> | undefined;
+  let submittedItems: Array<Record<string, unknown>> = [];
+  context.mock.method(User, "findById", (() => ({ select: async () => ({ _id: ownerId }) })) as Function);
+  context.mock.method(Invoice, "findOne", (() => draft) as Function);
+  context.mock.method(Invoice, "findOneAndUpdate", ((_filter: unknown, update: { $set: Record<string, unknown> }) => {
+    savedInvoice = { ...update.$set, _id: draftId };
+    return { lean: async () => savedInvoice };
+  }) as Function);
+  context.mock.method(Invoice.collection, "indexes", (async () => []) as Function);
+  context.mock.method(Invoice.collection, "createIndex", (async () => "paypal-invoice-test-index") as Function);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/v1/oauth2/token")) {
+      return new Response(JSON.stringify({
+        access_token: "temporary-test-token",
+        expires_in: 3600,
+        scope: "https://uri.paypal.com/services/invoicing/invoices/write",
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+
+    const requestBody = JSON.parse(String(init?.body)) as {
+      items: Array<Record<string, unknown>>;
+    };
+    submittedItems = requestBody.items;
+    assert.deepEqual(draft.lineItems, [{
+      description: "Banking website development",
+      amount: "500.00",
+    }]);
+    return new Response(JSON.stringify({
+      id: "PAYPAL-INVOICE-ANITHA",
+      status: "DRAFT",
+      detail: {
+        invoice_number: "INV-ANITHA-1",
+        invoice_date: "2026-11-10",
+        currency_code: "USD",
+        payment_term: { due_date: "2026-11-12" },
+      },
+      primary_recipients: [{
+        billing_info: {
+          email_address: "client-us415@business.example.com",
+          name: { full_name: "Anitha" },
+        },
+      }],
+      items: requestBody.items,
+      amount: { value: "500.00", currency_code: "USD" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+
+  try {
+    clearPaypalTokenCache();
+    const invoice = await publishLocalInvoiceToPaypal(
+      ownerId,
+      draftId,
+      "ab2e1533-8526-4d7a-8e54-37d4800ec987",
+    );
+    assert.equal(submittedItems.length, 1);
+    assert.deepEqual((submittedItems[0]?.unit_amount), {
+      currency_code: "USD",
+      value: "500.00",
+    });
+    assert.deepEqual(invoice.lineItems, [{
+      description: "Banking website development",
+      amount: "500.00",
+    }]);
+    assert.deepEqual(savedInvoice?.lineItems, invoice.lineItems);
+  } finally {
+    clearPaypalTokenCache();
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("validates PayPal invoice currencies and fractional precision before calling PayPal", async () => {

@@ -4,7 +4,7 @@ import { env } from "../config/env.js";
 import { paypalInvoiceCurrencies } from "../config/paypalCurrencies.js";
 import { Invoice } from "../models/Invoice.ts";
 import { AppError } from "../utils/errors.js";
-import { calculateInvoiceLineItemTotal, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
+import { calculateInvoiceLineItemTotal, normalizeInvoiceLineItems, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
 import { assertConfiguredOwner } from "./paypalService.ts";
 import { ensurePaypalInvoiceIndex } from "./invoiceIndexService.js";
 import { paypalRequest, verifyPaypalInvoiceOAuth } from "./paypalClient.js";
@@ -125,11 +125,16 @@ function completeInvoiceDescription(input: PaypalInvoiceCreationInput) {
 
 export function buildPaypalInvoicePayload(input: PaypalInvoiceCreationInput) {
   validateInvoiceCurrencyAndAmount(input);
-  if (input.lineItems) {
-    const lineItemsTotal = calculateInvoiceLineItemTotal(input.lineItems, input.currency);
-    if (!new Decimal(input.amount).eq(lineItemsTotal)) {
-      throw new AppError(422, "Invoice total must equal the sum of its line items.", "INVOICE_LINE_ITEM_TOTAL_MISMATCH");
-    }
+  const lineItems = normalizeInvoiceLineItems(
+    input.lineItems,
+    input.project,
+    completeInvoiceDescription(input),
+    input.amount,
+    input.currency,
+  );
+  const lineItemsTotal = calculateInvoiceLineItemTotal(lineItems, input.currency);
+  if (!new Decimal(input.amount).eq(lineItemsTotal)) {
+    throw new AppError(422, "Invoice total must equal the sum of its line items.", "INVOICE_LINE_ITEM_TOTAL_MISMATCH");
   }
   const [givenName, ...surnameParts] = input.client.trim().split(/\s+/);
   const description = completeInvoiceDescription(input);
@@ -154,20 +159,12 @@ export function buildPaypalInvoicePayload(input: PaypalInvoiceCreationInput) {
         } : {}),
       },
     }],
-    items: input.lineItems?.map((item) => ({
+    items: lineItems.map((item) => ({
       name: item.description.slice(0, 200),
       description: item.description,
       quantity: "1",
       unit_amount: { currency_code: input.currency, value: item.amount },
-    })) ?? [{
-      name: (input.project || description).slice(0, 200),
-      description,
-      quantity: "1",
-      unit_amount: {
-        currency_code: input.currency,
-        value: input.amount,
-      },
-    }],
+    })),
   };
 }
 
@@ -608,6 +605,13 @@ async function saveCreatedPaypalInvoice(
   requestId: string,
   existingInvoiceId?: string,
 ) {
+  const lineItems = normalizeInvoiceLineItems(
+    input.lineItems,
+    input.project,
+    input.description,
+    input.amount,
+    input.currency,
+  );
   const mapped = mapPaypalInvoice(userId, addSubmittedInvoiceDetails(created, input));
   if (!mapped || mapped.status !== "Draft") {
     throw new AppError(502, "PayPal created an invoice but did not confirm a usable draft response. Sync PayPal invoices to recover it.", "PAYPAL_INVOICE_CREATE_UNCONFIRMED", {
@@ -625,8 +629,8 @@ async function saveCreatedPaypalInvoice(
         ...mapped,
         clientId: input.clientId ?? null,
         project: input.project ?? "",
-        services: input.services ?? [],
-        lineItems: input.lineItems ?? [],
+        services: input.services?.length ? input.services : lineItems.map(({ description }) => description),
+        lineItems,
         paypalRequestId: requestId,
         paypalLastSyncedAt: new Date(),
       },
@@ -714,13 +718,30 @@ export async function publishLocalInvoiceToPaypal(userId: string, localInvoiceId
     email: pendingInvoice.email,
     project: pendingInvoice.project,
     services: pendingInvoice.services,
-    lineItems: pendingInvoice.lineItems,
+    lineItems: normalizeInvoiceLineItems(
+      pendingInvoice.lineItems,
+      pendingInvoice.project,
+      pendingInvoice.description,
+      pendingInvoice.amount,
+      pendingInvoice.currency,
+    ),
     amount: pendingInvoice.amount,
     currency: pendingInvoice.currency,
     description: pendingInvoice.description,
     date: pendingInvoice.invoiceDate,
     due: pendingInvoice.dueDate ?? pendingInvoice.invoiceDate,
   };
+  const lineItemsTotal = calculateInvoiceLineItemTotal(input.lineItems!, input.currency);
+  if (!new Decimal(input.amount).eq(lineItemsTotal)) {
+    throw new AppError(422, "Invoice total must equal the sum of its line items.", "INVOICE_LINE_ITEM_TOTAL_MISMATCH");
+  }
+  if (!pendingInvoice.lineItems.length) {
+    pendingInvoice.set("lineItems", input.lineItems);
+    if (!pendingInvoice.services.length) {
+      pendingInvoice.services = input.lineItems!.map(({ description }) => description);
+    }
+    await pendingInvoice.save();
+  }
   await ensurePaypalInvoiceIndex();
   const stableRequestId = pendingInvoice.paypalRequestId || requestId;
   let created: PaypalInvoiceRecord;

@@ -62,7 +62,17 @@ export default function CreateInvoice() {
     try {
       const linked = await publishInvoiceToPaypal(invoice.id, activeAgent.paypalRequestId);
       if (activeOperation !== operationId.current) return invoice;
-      setAgent((current) => ({ ...current, invoice: linked, paypalError: "" }));
+      setAgent((current) => ({
+        ...current,
+        draft: {
+          ...current.draft,
+          lineItems: linked.lineItems || current.draft.lineItems,
+          services: linked.services || current.draft.services,
+          amount: String(linked.amount || current.draft.amount),
+        },
+        invoice: linked,
+        paypalError: "",
+      }));
       toast.success("PayPal confirmed the invoice draft.");
       setShowPreview(true);
       return linked;
@@ -88,7 +98,18 @@ export default function CreateInvoice() {
       localInvoice = await createLocalInvoiceDraft(payload, activeAgent.sessionId);
     }
     if (activeOperation !== operationId.current) return null;
-    const updatedAgent = { ...activeAgent, invoice: localInvoice, paypalRequestId, paypalError: "" };
+    const updatedAgent = {
+      ...activeAgent,
+      draft: {
+        ...activeAgent.draft,
+        lineItems: localInvoice.lineItems || activeAgent.draft.lineItems,
+        services: localInvoice.services || activeAgent.draft.services,
+        amount: String(localInvoice.amount || activeAgent.draft.amount),
+      },
+      invoice: localInvoice,
+      paypalRequestId,
+      paypalError: "",
+    };
     setAgent((current) => ({ ...current, ...updatedAgent }));
     setShowPreview(true);
     if (localInvoice.source === "paypal") {
