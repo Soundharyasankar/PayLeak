@@ -47,6 +47,11 @@ app.use(cors({
   optionsSuccessStatus: 204,
 }));
 app.use(express.json({ limit: "1mb" }));
+app.get("/", (_req, res) => res.json({
+  success: true,
+  message: "PayLeak API is running",
+  status: "healthy",
+}));
 app.use((_req, _res, next) => {
   if (env.NODE_ENV === "test") {
     next();

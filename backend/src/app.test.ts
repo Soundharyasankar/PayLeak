@@ -24,6 +24,14 @@ test("health and protected route responses use the documented API envelope", asy
     { subject: "507f1f77bcf86cd799439011" },
   );
 
+  const root = await fetch(`${baseUrl}/`);
+  assert.equal(root.status, 200);
+  assert.deepEqual(await root.json(), {
+    success: true,
+    message: "PayLeak API is running",
+    status: "healthy",
+  });
+
   const invoicePreflight = await fetch(`${baseUrl}/api/invoices`, {
     method: "OPTIONS",
     headers: {
