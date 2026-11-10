@@ -2,21 +2,55 @@ import { Router } from "express";
 import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
 import { validateBody } from "../middleware/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { success } from "../utils/response.js";
-import { AppError } from "../utils/errors.js";
-import { Invoice } from "../models/Invoice.js";
-import { createInvoice, deleteInvoice, getInvoice, listInvoices, publishInvoiceToPaypal, sendInvoice, updateInvoice } from "../services/invoiceService.js";
+import { rateLimitExceeded, success } from "../utils/response.js";
+import { createInvoice, createLocalInvoiceDraft, deleteInvoice, getInvoice, listInvoices, publishInvoiceToPaypal, sendInvoice, updateInvoice } from "../services/invoiceService.js";
 import { invoiceBody, invoiceFields, validateInvoiceAmountPrecision } from "../validators/invoice.js";
+import { invoiceAssistantRequestSchema } from "../validators/invoiceAssistant.js";
 import { idParam } from "../validators/common.js";
 import { z } from "zod";
+import { rateLimit } from "express-rate-limit";
 import { diagnosePaypalInvoiceAccess, syncPaypalInvoices } from "../services/paypalInvoiceService.js";
+import { paypalInvoiceCurrencies } from "../config/paypalCurrencies.js";
+import { understandInvoiceTurn } from "../services/invoiceAssistantService.js";
 
-const invoicePatch = invoiceFields.partial().superRefine(validateInvoiceAmountPrecision);
+const invoicePatch = invoiceFields.extend({
+  project: z.string().trim().max(160).optional(),
+  services: z.array(z.string().trim().min(1).max(200)).max(30).optional(),
+}).partial().superRefine(validateInvoiceAmountPrecision);
 const idempotencyKey = z.string().uuid();
+const localDraftBody = invoiceFields.extend({
+  project: z.string().trim().max(160).optional(),
+  services: z.array(z.string().trim().min(1).max(200)).max(30).default([]),
+  assistantSessionId: idempotencyKey,
+}).superRefine(validateInvoiceAmountPrecision).refine((value) => value.due >= value.date, {
+  message: "Due date must be on or after the invoice date.",
+  path: ["due"],
+});
+const invoiceAssistantLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: rateLimitExceeded,
+});
 export const invoiceRoutes = Router();
 invoiceRoutes.use(requireAuth);
 
+invoiceRoutes.post("/assistant", invoiceAssistantLimit, validateBody(invoiceAssistantRequestSchema), asyncHandler(async (req, res) =>
+  success(res, await understandInvoiceTurn(req.body.message, req.body.draft, req.body.history))));
+invoiceRoutes.get("/currencies", asyncHandler(async (_req, res) => success(res, {
+  currencies: Object.entries(paypalInvoiceCurrencies).map(([code, details]) => ({
+    code,
+    ...details,
+    symbol: new Intl.NumberFormat("en", { style: "currency", currency: code })
+      .formatToParts(0)
+      .find((part) => part.type === "currency")?.value ?? code,
+  })),
+  accountAvailability: "These are ISO currencies recognized by the server runtime. PayPal confirms invoicing and merchant availability when the invoice is created.",
+})));
 invoiceRoutes.get("/", asyncHandler(async (req, res) => success(res, await listInvoices(getUserId(req)))));
+invoiceRoutes.post("/local-draft", validateBody(localDraftBody), asyncHandler(async (req, res) =>
+  success(res, await createLocalInvoiceDraft(getUserId(req), req.body), 201)));
 invoiceRoutes.post("/", validateBody(invoiceBody), asyncHandler(async (req, res) => {
   const requestId = idempotencyKey.parse(req.header("Idempotency-Key"));
   return success(res, await createInvoice(getUserId(req), req.body, requestId), 201);
@@ -40,9 +74,6 @@ invoiceRoutes.put("/:id", validateBody(invoicePatch), asyncHandler(async (req, r
 }));
 invoiceRoutes.delete("/:id", asyncHandler(async (req, res) => {
   const { id } = idParam.parse(req.params);
-  const invoice = await Invoice.findOne({ _id: id, userId: getUserId(req) }).select("status");
-  if (!invoice) throw new AppError(404, "Invoice not found.", "INVOICE_NOT_FOUND");
-  if (invoice.status === "Paid") throw new AppError(409, "Paid invoices cannot be deleted.", "INVOICE_ALREADY_PAID");
   await deleteInvoice(getUserId(req), id);
   return res.status(204).end();
 }));

@@ -1,28 +1,13 @@
-export const paypalInvoiceCurrencies = {
-  USD: { name: "US Dollar", fractionDigits: 2 },
-  EUR: { name: "Euro", fractionDigits: 2 },
-  GBP: { name: "British Pound", fractionDigits: 2 },
-  AUD: { name: "Australian Dollar", fractionDigits: 2 },
-  CAD: { name: "Canadian Dollar", fractionDigits: 2 },
-  SGD: { name: "Singapore Dollar", fractionDigits: 2 },
-  CHF: { name: "Swiss Franc", fractionDigits: 2 },
-  NZD: { name: "New Zealand Dollar", fractionDigits: 2 },
-  JPY: { name: "Japanese Yen", fractionDigits: 0 },
-  HKD: { name: "Hong Kong Dollar", fractionDigits: 2 },
-  MXN: { name: "Mexican Peso", fractionDigits: 2 },
-  PHP: { name: "Philippine Peso", fractionDigits: 2 },
-  PLN: { name: "Polish Zloty", fractionDigits: 2 },
-  SEK: { name: "Swedish Krona", fractionDigits: 2 },
-  THB: { name: "Thai Baht", fractionDigits: 2 },
-  NOK: { name: "Norwegian Krone", fractionDigits: 2 },
-  DKK: { name: "Danish Krone", fractionDigits: 2 },
-  CZK: { name: "Czech Koruna", fractionDigits: 2 },
-  ILS: { name: "Israeli New Shekel", fractionDigits: 2 },
-  HUF: { name: "Hungarian Forint", fractionDigits: 0 },
-  TWD: { name: "New Taiwan Dollar", fractionDigits: 2 },
-  CNY: { name: "Chinese Yuan", fractionDigits: 2 },
-  MYR: { name: "Malaysian Ringgit", fractionDigits: 2 },
-  BRL: { name: "Brazilian Real", fractionDigits: 2 },
-} as const;
+const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
 
-export type PaypalInvoiceCurrency = keyof typeof paypalInvoiceCurrencies;
+export const paypalInvoiceCurrencies: Record<string, { name: string; fractionDigits: number }> =
+  Object.fromEntries(
+    Intl.supportedValuesOf("currency").sort().map((code) => {
+      const fractionDigits = new Intl.NumberFormat("en", { style: "currency", currency: code })
+        .resolvedOptions().maximumFractionDigits;
+      if (fractionDigits === undefined) throw new Error(`Missing fraction-digit metadata for ${code}.`);
+      return [code, { name: currencyNames.of(code) ?? code, fractionDigits }];
+    }),
+  );
+
+export type PaypalInvoiceCurrency = string;

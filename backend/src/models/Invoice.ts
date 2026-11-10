@@ -5,6 +5,16 @@ const invoiceSchema = new Schema({
   clientId: { type: Schema.Types.ObjectId, ref: "Client", default: null },
   client: { type: String, trim: true, maxlength: 160, default: "" },
   email: { type: String, lowercase: true, trim: true, maxlength: 254, default: "" },
+  project: { type: String, trim: true, maxlength: 160, default: "" },
+  services: { type: [String], default: [] },
+  lineItems: {
+    type: [{
+      _id: false,
+      description: { type: String, trim: true, maxlength: 200, required: true },
+      amount: { type: String, required: true },
+    }],
+    default: [],
+  },
   amount: { type: String, required: true },
   currency: { type: String, required: true, uppercase: true },
   description: { type: String, trim: true, maxlength: 2000, default: "" },
@@ -23,12 +33,21 @@ const invoiceSchema = new Schema({
   source: { type: String, enum: ["payleak", "paypal"], default: "payleak", required: true },
   paypalInvoiceId: { type: String, trim: true },
   paypalRequestId: { type: String, trim: true },
+  assistantSessionId: { type: String, trim: true },
   paypalSendRequestId: { type: String, trim: true },
   paypalStatus: { type: String, default: null },
   paypalLastSyncedAt: { type: Date, default: null },
 }, { timestamps: true, versionKey: false });
 
 invoiceSchema.index({ userId: 1, createdAt: -1 });
+invoiceSchema.index(
+  { userId: 1, assistantSessionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { assistantSessionId: { $type: "string" } },
+    name: "userId_1_assistantSessionId_1_unique",
+  },
+);
 invoiceSchema.index(
   { userId: 1, paypalInvoiceId: 1 },
   {

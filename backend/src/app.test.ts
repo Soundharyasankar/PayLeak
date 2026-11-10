@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import jwt from "jsonwebtoken";
 
 process.env.MONGODB_URI ??= "mongodb://127.0.0.1:27017/payleak-test";
 process.env.JWT_SECRET ??= "test-only-signing-secret-that-is-never-used";
 process.env.FRONTEND_URL ??= "http://localhost:5173";
 process.env.NODE_ENV = "test";
+process.env.GEMINI_API_KEY = "";
 
 test("health and protected route responses use the documented API envelope", async (context) => {
   const { app } = await import("./app.js");
@@ -16,6 +18,11 @@ test("health and protected route responses use the documented API envelope", asy
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const baseUrl = `http://127.0.0.1:${address.port}`;
+  const testToken = jwt.sign(
+    { email: "invoice-test@example.com" },
+    process.env.JWT_SECRET!,
+    { subject: "507f1f77bcf86cd799439011" },
+  );
 
   const invoicePreflight = await fetch(`${baseUrl}/api/invoices`, {
     method: "OPTIONS",
@@ -90,6 +97,48 @@ test("health and protected route responses use the documented API envelope", asy
   assert.equal(protectedInvoiceCreate.status, 401);
   assert.equal((await protectedInvoiceCreate.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
 
+  const protectedInvoiceAssistant = await fetch(`${baseUrl}/api/invoices/assistant`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "Create an invoice." }),
+  });
+  assert.equal(protectedInvoiceAssistant.status, 401);
+  assert.equal((await protectedInvoiceAssistant.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
+
+  const invalidAssistantRequest = await fetch(`${baseUrl}/api/invoices/assistant`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${testToken}`,
+    },
+    body: JSON.stringify({
+      message: "Create an invoice.",
+      draft: { date: "2026-11-10", due: "Friday" },
+    }),
+  });
+  assert.equal(invalidAssistantRequest.status, 400);
+  const invalidAssistantBody = await invalidAssistantRequest.json() as {
+    error: { code: string; message: string; details: { issues: Array<{ field: string }> } };
+  };
+  assert.equal(invalidAssistantBody.error.code, "VALIDATION_ERROR");
+  assert.match(invalidAssistantBody.error.message, /draft\.due/);
+  assert.ok(invalidAssistantBody.error.details.issues.some((issue) => issue.field === "draft.due"));
+
+  const validAssistantRequest = await fetch(`${baseUrl}/api/invoices/assistant`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${testToken}`,
+    },
+    body: JSON.stringify({
+      message: "Create an invoice for Priya Sharma.",
+      draft: { date: "2026-11-10" },
+      history: [],
+    }),
+  });
+  assert.equal(validAssistantRequest.status, 503);
+  assert.equal((await validAssistantRequest.json() as { error: { code: string } }).error.code, "AI_UNAVAILABLE");
+
   const protectedLocalInvoicePublish = await fetch(`${baseUrl}/api/invoices/507f1f77bcf86cd799439011/paypal`, { method: "POST" });
   assert.equal(protectedLocalInvoicePublish.status, 401);
   assert.equal((await protectedLocalInvoicePublish.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
@@ -109,6 +158,18 @@ test("health and protected route responses use the documented API envelope", asy
   });
   assert.equal(protectedAiChat.status, 401);
   assert.equal((await protectedAiChat.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
+
+  const protectedFinancialAgent = await fetch(`${baseUrl}/api/ai/financial-agent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: "Analyse my client finances." }),
+  });
+  assert.equal(protectedFinancialAgent.status, 401);
+  assert.equal((await protectedFinancialAgent.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
+
+  const protectedFinancialReport = await fetch(`${baseUrl}/api/ai/reports/507f1f77bcf86cd799439011/download`);
+  assert.equal(protectedFinancialReport.status, 401);
+  assert.equal((await protectedFinancialReport.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
 
   const protectedAiDiagnostics = await fetch(`${baseUrl}/api/ai/diagnostics`, { method: "POST" });
   assert.equal(protectedAiDiagnostics.status, 401);

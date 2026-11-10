@@ -64,6 +64,15 @@ respective PayPal permissions or delivery integration are configured. Financial
 reports preserve source currencies and do not invent missing fee or conversion
 values.
 
+The AI Assistant provides client-specific analysis from owner-scoped client,
+invoice, and PayPal transaction records, with currency-separated totals,
+deterministic rankings for recorded revenue, fees, and outstanding invoices, and
+authenticated downloadable client PDFs. The current schema has no project or
+project-expense records, so complete net profit and project profitability are
+explicitly marked undetermined. PDF reports require the configured Gemini
+service for report insights and are stored with user-scoped metadata and
+download authorization.
+
 API contracts are documented in
 [`docs/API_CONTRACTS.md`](./docs/API_CONTRACTS.md). Backend startup must
 successfully connect to MongoDB before Express begins listening.

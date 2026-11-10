@@ -96,6 +96,78 @@ test("builds a single-currency PayPal invoice payload from validated invoice fie
   assert.deepEqual(payload.primary_recipients[0]?.billing_info.name, { given_name: "Jordan", surname: "Lee" });
   assert.equal(payload.items[0]?.quantity, "1");
   assert.deepEqual(payload.items[0]?.unit_amount, { currency_code: "USD", value: "200.00" });
+
+  for (const [currency, amount] of [["EUR", "900.00"], ["GBP", "750.00"], ["CAD", "2000.00"]] as const) {
+    const multiCurrencyPayload = buildPaypalInvoicePayload({
+      client: "Priya Client",
+      email: "client@example.com",
+      amount,
+      currency,
+      description: "Professional services",
+      date: new Date("2026-11-09T00:00:00.000Z"),
+      due: new Date("2026-11-24T00:00:00.000Z"),
+    });
+    assert.equal(multiCurrencyPayload.detail.currency_code, currency);
+    assert.deepEqual(multiCurrencyPayload.items[0]?.unit_amount, { currency_code: currency, value: amount });
+  }
+  const inrPayload = buildPaypalInvoicePayload({
+    client: "Priya Client",
+    email: "client@example.com",
+    project: "Website Development",
+    services: ["Frontend Development", "Backend Development", "Deployment"],
+    amount: "50000",
+    currency: "INR",
+    description: "Website Development",
+    date: new Date("2026-11-09T00:00:00.000Z"),
+    due: new Date("2026-11-24T00:00:00.000Z"),
+  });
+  assert.equal(inrPayload.detail.currency_code, "INR");
+  assert.deepEqual(inrPayload.items[0], {
+    name: "Website Development",
+    description: "Website Development\n- Frontend Development\n- Backend Development\n- Deployment",
+    quantity: "1",
+    unit_amount: { currency_code: "INR", value: "50000" },
+  });
+
+  const itemizedPayload = buildPaypalInvoicePayload({
+    client: "John David",
+    email: "john@example.com",
+    project: "E-commerce website",
+    services: ["Frontend work", "Backend development"],
+    lineItems: [
+      { description: "Frontend work", amount: "400.00" },
+      { description: "Backend development", amount: "350.00" },
+      { description: "Payment gateway integration", amount: "250.00" },
+      { description: "Hosting and deployment", amount: "200.00" },
+    ],
+    amount: "1200.00",
+    currency: "EUR",
+    description: "E-commerce website",
+    date: new Date("2026-11-09T00:00:00.000Z"),
+    due: new Date("2026-11-19T00:00:00.000Z"),
+  });
+  assert.deepEqual(itemizedPayload.items.map((item) => ({
+    description: item.description,
+    amount: item.unit_amount.value,
+    currency: item.unit_amount.currency_code,
+  })), [
+    { description: "Frontend work", amount: "400.00", currency: "EUR" },
+    { description: "Backend development", amount: "350.00", currency: "EUR" },
+    { description: "Payment gateway integration", amount: "250.00", currency: "EUR" },
+    { description: "Hosting and deployment", amount: "200.00", currency: "EUR" },
+  ]);
+  assert.throws(() => buildPaypalInvoicePayload({
+    client: "John David",
+    email: "john@example.com",
+    lineItems: [{ description: "Development", amount: "1199" }],
+    amount: "1200",
+    currency: "EUR",
+    description: "Development",
+    date: new Date("2026-11-09T00:00:00.000Z"),
+    due: new Date("2026-11-19T00:00:00.000Z"),
+  }), (error: unknown) => error instanceof Error
+    && "code" in error
+    && error.code === "INVOICE_LINE_ITEM_TOTAL_MISMATCH");
 });
 
 test("validates PayPal invoice currencies and fractional precision before calling PayPal", async () => {
@@ -111,7 +183,11 @@ test("validates PayPal invoice currencies and fractional precision before callin
   };
 
   assert.equal(invoiceBody.safeParse(base).success, true);
-  assert.equal(invoiceBody.safeParse({ ...base, currency: "INR" }).success, false);
+  assert.equal(invoiceBody.safeParse({ ...base, currency: "INR", amount: "50000" }).success, true);
+  assert.equal(invoiceBody.safeParse({ ...base, currency: "EUR", amount: "200.00" }).success, true);
+  assert.equal(invoiceBody.safeParse({ ...base, currency: "GBP", amount: "200.00" }).success, true);
+  assert.equal(invoiceBody.safeParse({ ...base, currency: "CAD", amount: "200.00" }).success, true);
+  assert.equal(invoiceBody.safeParse({ ...base, currency: "XYZ" }).success, false);
   assert.equal(invoiceBody.safeParse({ ...base, currency: "JPY", amount: "200.50" }).success, false);
   assert.equal(invoiceBody.safeParse({ ...base, currency: "JPY", amount: "200" }).success, true);
 });
@@ -182,7 +258,8 @@ test("creates invoices through PayPal with a request ID for safe retries", async
     return new Response(JSON.stringify({
       id: "PAYPAL-INVOICE-123",
       status: "DRAFT",
-      detail: { invoice_number: "INV-2001" },
+      detail: { invoice_number: "INV-2001", currency_code: "USD" },
+      amount: { value: "200.00", currency_code: "USD" },
     }), { status: 201, headers: { "Content-Type": "application/json" } });
   };
 
@@ -203,6 +280,74 @@ test("creates invoices through PayPal with a request ID for safe retries", async
     assert.equal(created.id, "PAYPAL-INVOICE-123");
     assert.equal(created.status, "DRAFT");
     assert.equal((requestBody.detail as { currency_code: string }).currency_code, "USD");
+    assert.deepEqual((requestBody.items as Array<{ unit_amount: { value: string; currency_code: string } }>)[0]?.unit_amount, {
+      currency_code: "USD",
+      value: "200.00",
+    });
+  } finally {
+    clearPaypalTokenCache();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("updates a linked PayPal draft and confirms its currency and exact amount", async () => {
+  const originalFetch = globalThis.fetch;
+  const { clearPaypalTokenCache } = await import("./paypalClient.js");
+  const { updatePaypalInvoiceRecord } = await import("./paypalInvoiceService.js");
+  const requests: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [];
+
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/v1/oauth2/token")) {
+      return new Response(JSON.stringify({
+        access_token: "temporary-test-token",
+        expires_in: 3600,
+        scope: "https://uri.paypal.com/services/invoicing/invoices/write",
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+
+    requests.push({
+      method: init?.method ?? "GET",
+      path: url.pathname,
+      ...(init?.body ? { body: JSON.parse(String(init.body)) as Record<string, unknown> } : {}),
+    });
+    if (init?.method === "PUT") return new Response(null, { status: 204 });
+    return new Response(JSON.stringify({
+      id: "PAYPAL-INVOICE-123",
+      status: "DRAFT",
+      detail: {
+        invoice_number: "INV-2001",
+        invoice_date: "2026-11-09",
+        currency_code: "INR",
+        payment_term: { due_date: "2026-11-24" },
+      },
+      primary_recipients: [{ billing_info: { email_address: "priya@example.com", name: { full_name: "Priya Sharma" } } }],
+      items: [{ name: "Website Development", description: "Frontend Development", quantity: "1", unit_amount: { value: "50000", currency_code: "INR" } }],
+      amount: { value: "50000", currency_code: "INR" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+
+  try {
+    clearPaypalTokenCache();
+    const updated = await updatePaypalInvoiceRecord("PAYPAL-INVOICE-123", {
+      client: "Priya Sharma",
+      email: "priya@example.com",
+      project: "Website Development",
+      services: ["Frontend Development"],
+      amount: "50000",
+      currency: "INR",
+      description: "Frontend Development",
+      date: new Date("2026-11-09T00:00:00.000Z"),
+      due: new Date("2026-11-24T00:00:00.000Z"),
+    });
+
+    assert.deepEqual(requests.map(({ method, path }) => [method, path]), [
+      ["PUT", "/v2/invoicing/invoices/PAYPAL-INVOICE-123"],
+      ["GET", "/v2/invoicing/invoices/PAYPAL-INVOICE-123"],
+    ]);
+    assert.equal((requests[0]?.body?.detail as { currency_code: string }).currency_code, "INR");
+    assert.equal(updated.amount?.value, "50000");
+    assert.equal(updated.status, "DRAFT");
   } finally {
     clearPaypalTokenCache();
     globalThis.fetch = originalFetch;

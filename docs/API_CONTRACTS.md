@@ -38,13 +38,16 @@ fees or rates.
 | PUT | `/clients/:id` | Update a client |
 | DELETE | `/clients/:id` | Delete a client |
 | GET | `/invoices` | List the user's invoices |
+| GET | `/invoices/currencies` | List ISO currencies recognized by the server runtime and their precision rules; PayPal confirms invoicing availability on create |
+| POST | `/invoices/assistant` | Send a natural-language invoice turn and receive schema-validated draft updates plus the next required-field question |
+| POST | `/invoices/local-draft` | Idempotently persist a completed local draft using `assistantSessionId` before PayPal synchronization |
 | POST | `/invoices` | Create a PayPal Sandbox draft first, then save the confirmed invoice for the authenticated merchant owner |
 | POST | `/invoices/paypal/diagnostics` | Verify PayPal OAuth, invoice API access, and the first Invoicing API page |
 | POST | `/invoices/sync-paypal` | Retrieve PayPal invoice pages/details and import or update them for the configured owner |
 | POST | `/invoices/:id/paypal` | Create an existing local draft in PayPal and link the confirmed PayPal invoice to that same MongoDB record |
 | GET | `/invoices/:id` | Get one invoice |
 | PUT | `/invoices/:id` | Update an invoice |
-| DELETE | `/invoices/:id` | Delete an unpaid invoice |
+| DELETE | `/invoices/:id` | Delete only an unsent local PayLeak draft; ownership, source, status, and PayPal linkage are checked atomically |
 | POST | `/invoices/:id/send` | Send a PayPal-confirmed draft and update local status only after PayPal confirms sending |
 | GET | `/analytics` | Currency-separated dashboard metrics |
 | GET | `/analytics/dashboard` | Dashboard metrics (alias) |
@@ -68,6 +71,9 @@ fees or rates.
 | POST | `/notifications/reminders/:invoiceId/send` | Currently unavailable; no email is sent |
 | POST | `/ai/chat` | Ask the AI to explain stored financial data |
 | POST | `/ai/assistant` | AI chat alias |
+| POST | `/ai/financial-agent` | Resolve an authenticated client, calculate client or business summaries from owned client/invoice/transaction records, then generate a grounded answer; accepts optional `contextClientId`, `selectedClientId`, `periodStart`, and `periodEnd` |
+| POST | `/ai/reports/client` | Generate a client financial PDF, store its metadata and document in MongoDB, and return a report ID; body accepts `clientId` and optional period bounds |
+| GET | `/ai/reports/:reportId/download` | Download a generated PDF after verifying report ownership |
 | POST | `/ai/diagnostics` | Test Google Gemini key availability, model, and API connectivity without returning credentials |
 
 Transaction analysis uses only fields returned by PayPal Transaction Search and PayLeak's
@@ -75,6 +81,24 @@ deterministic decimal calculation. A calculated net is available only for a non-
 transaction when the actual PayPal gross and fee use the same currency. Verification
 statuses are `MATCH`, `MISMATCH`, `NOT_AVAILABLE`, or `NOT_APPLICABLE`; a PayPal refresh
 updates the selected transaction from Transaction Search and does not infer a bank payout.
+
+The client financial agent uses deterministic backend calculations before requesting
+an AI explanation. It associates transactions by stored client ID or exact registered
+client email, and falls back to an exact unique payer-name match only when PayPal
+provides no payer email; an explicit client ID always takes precedence. Analysis
+reuses the owner-scoped transaction retrieval service used by the Transactions API
+and deduplicates PayPal transaction IDs. Account-wide totals are calculated
+directly from all owner-scoped transactions and invoices, including transactions
+that cannot safely be associated with a registered client; client rankings use
+only safely associated records. Retrieval failures return an explicit error and
+are logged with a masked owner identifier and record counts. Received payment
+totals come only from successful PayPal transactions; invoices are shown
+separately and never added to received revenue. Amounts remain grouped by
+currency. The summary distinguishes gross receipts after recorded transaction
+fees from net profit. Client net profit and project profitability are marked
+unavailable because this installation has no project or project-expense models.
+Generated PDFs are stored with user ownership metadata and downloaded through
+the authenticated route; creation and download are rate-limited.
 
 AI chat accepts `{ "question": "...", "history": [{ "role": "user|assistant", "text": "..." }] }`.
 The backend fetches transactions, invoices, and currency conversions using the
@@ -108,13 +132,45 @@ Email matching is not an ownership proof. Connecting separate merchants
 requires eligible PayPal partner seller-consent access; app client credentials
 alone do not supply that authorization.
 
-Invoice creation requires an authenticated user matching
+Direct PayPal invoice creation requires an authenticated user matching
 `PAYPAL_ACCOUNT_OWNER_USER_ID`, Sandbox app credentials, and a UUID
-`Idempotency-Key` header. The API calls `POST /v2/invoicing/invoices` before
-writing to MongoDB, sends one line item using the submitted amount/currency,
-and reports success only after PayPal returns a confirmed draft with an invoice
-ID and status. Failed PayPal requests never fall back to local-only invoice
-creation. Reuse the same idempotency key after a timeout.
+`Idempotency-Key` header. Itemized invoices send each validated line item in
+the selected currency; PayLeak calculates the total from those amounts using
+decimal arithmetic. The API reports PayPal success only after PayPal returns a
+confirmed draft with an invoice ID and status. Reuse the same idempotency key
+after a timeout.
+
+`GET /invoices/currencies` provides ISO currency codes recognized by the server
+runtime and their fraction-digit rules for validation and the creation form.
+This list does not guarantee availability for the Invoicing API, a particular
+merchant, or an environment: PayPal's actual create response is authoritative.
+PayLeak never converts an amount or substitutes another currency when PayPal
+rejects the requested code. The amount must respect that currency's precision.
+The create form requires an explicit currency and shows the selected code in
+its preview.
+
+The conversational invoice flow sends the complete user turn, current structured
+draft including priced line items, and recent turns to the configured Gemini
+provider through the authenticated `POST /invoices/assistant` route. The response
+is schema-validated, merged without discarding previously collected fields, and
+checked for required invoice fields. Backend decimal arithmetic calculates item
+totals and due dates.
+The browser keeps only the active conversation in component state; navigating
+away and returning starts a fresh conversation. Saved invoices remain available
+from the invoice list. Once complete, it automatically persists a PayLeak draft
+through `POST /invoices/local-draft`; retries with the same `assistantSessionId`
+return that same record. It then links the draft to PayPal with the existing
+idempotent `POST /invoices/:id/paypal` operation. PayPal failures leave the local
+draft available for retry and editing, even if an earlier PayPal request has an
+unresolved request ID. Editing a local draft only updates PayLeak and clears the
+stale PayPal request ID; editing an already linked draft uses PayPal's update
+operation and verifies the returned amount/currency. Invoice sending remains a
+separate explicit user action.
+
+`DELETE /invoices/:id` removes only an owned, unsent `source=payleak`,
+`status=Draft` record with no linked PayPal invoice ID. A stale PayPal request
+key does not prevent deletion. PayPal-linked, sent, paid, or otherwise finalized
+invoices are retained; deleting a local record never cancels a PayPal invoice.
 
 Previously saved local-only draft invoices remain identifiable as
 `source=payleak`. `POST /invoices/:id/paypal` creates the remote draft and links

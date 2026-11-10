@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Download, Eye, FilePlus2, RefreshCw, Search, Send, SlidersHorizontal } from "lucide-react";
+import { Download, Eye, FilePlus2, RefreshCw, Search, Send, SlidersHorizontal, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
+import Modal from "../components/Modal.jsx";
 import PageHeader from "../components/PageHeader.jsx";
 import StatCard from "../components/StatCard.jsx";
 import Panel from "../components/Panel.jsx";
@@ -17,7 +18,7 @@ function errorMessage(error) {
 }
 
 export default function Invoices() {
-  const { invoices, syncInvoices, loading, error: accountError } = useAppData();
+  const { invoices, syncInvoices, deleteInvoice, loading, error: accountError } = useAppData();
   const [params] = useSearchParams();
   const [query, setQuery] = useState(params.get("search") || "");
   const [statusFilter, setStatusFilter] = useState("All statuses");
@@ -26,6 +27,8 @@ export default function Invoices() {
   const [diagnosing, setDiagnosing] = useState(false);
   const [syncDiagnostics, setSyncDiagnostics] = useState(null);
   const [requestError, setRequestError] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
   const totals = getInvoiceTotals(invoices);
   const filtered = useMemo(() => invoices.filter((invoice) => {
@@ -84,6 +87,20 @@ export default function Invoices() {
     }
   };
 
+  const confirmDelete = async () => {
+    if (!deleteCandidate || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteInvoice(deleteCandidate.id);
+      toast.success("Local PayLeak draft deleted. No PayPal invoice was deleted.");
+      setDeleteCandidate(null);
+    } catch (deleteError) {
+      toast.error(errorMessage(deleteError));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="page-enter">
       <PageHeader eyebrow="BILLING" title="Invoice Management" description="Review PayLeak invoices and import existing invoices from your authorized PayPal Sandbox account." action={<><button className="button secondary" onClick={verifyPayPal} disabled={diagnosing || syncing}>{diagnosing ? <span className="spinner" /> : <Search size={16} />} Verify PayPal access</button><button className="button secondary" onClick={syncPayPal} disabled={syncing || diagnosing}>{syncing ? <span className="spinner" /> : <RefreshCw size={16} />} Sync PayPal invoices</button><Link to="/invoices/create" className="button primary"><FilePlus2 size={17} /> Create invoice</Link></>} />
@@ -132,13 +149,23 @@ export default function Invoices() {
           <select className="compact-select" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option>All statuses</option>{["Draft", "Sent", "Partially Paid", "Paid", "Overdue", "Cancelled", "Refunded"].map((item) => <option key={item}>{item}</option>)}</select>
         </div>
         <div className="table-scroll"><table className="data-table invoice-table"><thead><tr><th>Invoice</th><th>Client</th><th>Amount</th><th>Currency</th><th>Invoice date</th><th>Due date</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-          {visibleInvoices.map((invoice) => <tr key={invoice.id}><td><b className="table-primary">{invoice.invoiceNumber || invoice.id}</b><small className="table-secondary">{invoice.source === "paypal" ? "PayPal invoice" : "PayLeak invoice"}{invoice.description ? ` · ${invoice.description}` : ""}</small></td><td><b>{invoice.client}</b><small className="table-secondary">{invoice.email}</small></td><td><b>{money(invoice.amount, invoice.currency)}</b></td><td>{invoice.currency}</td><td>{invoice.date}</td><td>{invoice.due || "—"}</td><td><StatusBadge>{invoice.status}</StatusBadge></td><td><button className="icon-button table-action" title="View invoice" aria-label={`View ${invoice.invoiceNumber || invoice.id}`} onClick={() => navigate(`/invoices/${encodeURIComponent(invoice.id)}`)}><Eye size={16} /></button></td></tr>)}
+          {visibleInvoices.map((invoice) => <tr key={invoice.id}><td><b className="table-primary">{invoice.invoiceNumber || invoice.id}</b><small className="table-secondary">{invoice.source === "paypal" ? "PayPal invoice" : "PayLeak invoice"}{invoice.description ? ` · ${invoice.description}` : ""}</small></td><td><b>{invoice.client}</b><small className="table-secondary">{invoice.email}</small></td><td><b>{money(invoice.amount, invoice.currency)}</b></td><td>{invoice.currency}</td><td>{invoice.date}</td><td>{invoice.due || "—"}</td><td><StatusBadge>{invoice.status}</StatusBadge></td><td><button className="icon-button table-action" title="View invoice" aria-label={`View ${invoice.invoiceNumber || invoice.id}`} onClick={() => navigate(`/invoices/${encodeURIComponent(invoice.id)}`)}><Eye size={16} /></button>{invoice.source === "payleak" && invoice.status === "Draft" && !invoice.paypalId && <button className="icon-button table-action" title="Delete local draft" aria-label={`Delete draft for ${invoice.client}`} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={16} /></button>}</td></tr>)}
           {!loading && visibleInvoices.length === 0 && <tr><td colSpan="8"><div className="empty-state"><Search size={23} /><b>{requestError ? "Invoices could not be loaded from PayPal" : "No invoices match"}</b><span>{requestError ? "Check the PayPal access diagnostics above. Existing PayLeak invoices, if any, remain unchanged." : "Try another search or status filter, or sync PayPal invoices."}</span></div></td></tr>}
           {loading && visibleInvoices.length === 0 && <tr><td colSpan="8"><div className="empty-state"><span className="spinner" /> Loading invoices…</div></td></tr>}
         </tbody></table></div>
         <div className="table-toolbar"><span className="table-footnote">Showing {filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}</span><div className="pagination-controls"><button className="button secondary small-button" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</button><span>Page {page} of {pageCount}</span><button className="button secondary small-button" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)}>Next</button></div></div>
         <div className="table-footnote">PayPal invoices are imported only after PayPal grants Invoicing API read access. Local and PayPal invoices remain distinguishable.</div>
       </Panel>
+      {deleteCandidate && <Modal title="Delete local draft?" onClose={() => !deleting && setDeleteCandidate(null)}>
+        <div className="confirmation-copy">
+          <p>Delete the unsent PayLeak draft for <b>{deleteCandidate.client}</b>?</p>
+          <p className="muted">Only the local draft record will be removed. This will not cancel or delete a PayPal invoice. This action cannot be undone.</p>
+        </div>
+        <div className="modal-actions">
+          <button className="button secondary" onClick={() => setDeleteCandidate(null)} disabled={deleting}>Keep Draft</button>
+          <button className="button danger-outline" onClick={confirmDelete} disabled={deleting}>{deleting ? "Deleting…" : "Delete Draft"}</button>
+        </div>
+      </Modal>}
     </div>
   );
 }

@@ -1,8 +1,10 @@
 import { Decimal } from "decimal.js";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
+import { paypalInvoiceCurrencies } from "../config/paypalCurrencies.js";
 import { Invoice } from "../models/Invoice.js";
 import { AppError } from "../utils/errors.js";
+import { calculateInvoiceLineItemTotal, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
 import { assertConfiguredOwner } from "./paypalService.js";
 import { ensurePaypalInvoiceIndex } from "./invoiceIndexService.js";
 import { paypalRequest, verifyPaypalInvoiceOAuth } from "./paypalClient.js";
@@ -33,7 +35,12 @@ interface PaypalInvoiceRecord {
       name?: { given_name?: string; surname?: string; full_name?: string };
     };
   }>;
-  items?: Array<{ name?: string; description?: string; quantity?: string }>;
+  items?: Array<{
+    name?: string;
+    description?: string;
+    quantity?: string;
+    unit_amount?: PaypalMoney;
+  }>;
   amount?: {
     value?: string;
     currency_code?: string;
@@ -73,6 +80,9 @@ export interface PaypalInvoiceCreationInput {
   clientId?: string;
   client: string;
   email: string;
+  project?: string;
+  services?: string[];
+  lineItems?: InvoiceLineItem[];
   amount: string;
   currency: string;
   description: string;
@@ -80,17 +90,54 @@ export interface PaypalInvoiceCreationInput {
   due: Date;
 }
 
+function validateInvoiceCurrencyAndAmount(input: PaypalInvoiceCreationInput) {
+  const currency = paypalInvoiceCurrencies[input.currency as keyof typeof paypalInvoiceCurrencies];
+  if (!currency) {
+    throw new AppError(422, "This currency is not available for PayPal invoicing. No conversion was applied.", "PAYPAL_CURRENCY_UNSUPPORTED");
+  }
+  let amount: Decimal;
+  try {
+    amount = new Decimal(input.amount);
+  } catch {
+    throw new AppError(422, "Invoice amount must be a valid decimal number.", "INVOICE_AMOUNT_INVALID");
+  }
+  if (!amount.isFinite() || amount.lte(0)) {
+    throw new AppError(422, "Invoice amount must be greater than zero.", "INVOICE_AMOUNT_INVALID");
+  }
+  if (amount.decimalPlaces() > currency.fractionDigits) {
+    throw new AppError(422, `${input.currency} amounts cannot have more than ${currency.fractionDigits} decimal places.`, "INVOICE_AMOUNT_PRECISION_INVALID");
+  }
+}
+
 function dateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function completeInvoiceDescription(input: PaypalInvoiceCreationInput) {
+  const missingServices = (input.services ?? []).filter((service) =>
+    !input.description.toLocaleLowerCase().includes(service.toLocaleLowerCase()),
+  );
+  return [input.description, ...missingServices.map((service) => `- ${service}`)]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 2000);
+}
+
 export function buildPaypalInvoicePayload(input: PaypalInvoiceCreationInput) {
+  validateInvoiceCurrencyAndAmount(input);
+  if (input.lineItems) {
+    const lineItemsTotal = calculateInvoiceLineItemTotal(input.lineItems, input.currency);
+    if (!new Decimal(input.amount).eq(lineItemsTotal)) {
+      throw new AppError(422, "Invoice total must equal the sum of its line items.", "INVOICE_LINE_ITEM_TOTAL_MISMATCH");
+    }
+  }
   const [givenName, ...surnameParts] = input.client.trim().split(/\s+/);
+  const description = completeInvoiceDescription(input);
   return {
     detail: {
       invoice_date: dateOnly(input.date),
       currency_code: input.currency,
-      memo: input.description,
+      memo: input.project ? `${input.project}\n${description}` : description,
       payment_term: {
         term_type: "DUE_ON_DATE_SPECIFIED",
         due_date: dateOnly(input.due),
@@ -107,9 +154,14 @@ export function buildPaypalInvoicePayload(input: PaypalInvoiceCreationInput) {
         } : {}),
       },
     }],
-    items: [{
-      name: input.description.slice(0, 200),
-      description: input.description,
+    items: input.lineItems?.map((item) => ({
+      name: item.description.slice(0, 200),
+      description: item.description,
+      quantity: "1",
+      unit_amount: { currency_code: input.currency, value: item.amount },
+    })) ?? [{
+      name: (input.project || description).slice(0, 200),
+      description,
       quantity: "1",
       unit_amount: {
         currency_code: input.currency,
@@ -208,15 +260,60 @@ export async function createPaypalInvoiceRecord(
   if (!created.id) {
     throw new AppError(502, "PayPal did not return an invoice ID. The invoice was not saved in PayLeak.", "PAYPAL_INVOICE_ID_MISSING");
   }
-  if (!created.status || !created.detail?.invoice_number) {
-    try {
-      const details = await getInvoiceDetails(created.id, () => undefined);
-      return mergePaypalInvoice(created, details);
-    } catch (error) {
-      if (!created.status) throw error;
-    }
+  let confirmed = created;
+  if (!confirmed.status || !confirmed.detail?.invoice_number
+    || !confirmed.detail.currency_code || !confirmed.amount?.currency_code || !confirmed.amount.value) {
+    const details = await getInvoiceDetails(created.id, () => undefined);
+    confirmed = mergePaypalInvoice(created, details);
   }
-  return created;
+  const amount = confirmed.amount?.value;
+  const currencyCodes = [
+    confirmed.detail?.currency_code,
+    confirmed.amount?.currency_code,
+    ...(confirmed.items?.map((item) => item.unit_amount?.currency_code) ?? []),
+  ].filter((code): code is string => Boolean(code));
+  if (currencyCodes.some((code) => code !== input.currency)) {
+    throw new AppError(502, "PayPal returned an invoice in a different currency. PayLeak did not save it as a successful invoice.", "PAYPAL_INVOICE_CURRENCY_MISMATCH", {
+      paypalInvoiceId: confirmed.id,
+    });
+  }
+  if (!amount || !new Decimal(amount).eq(input.amount)) {
+    throw new AppError(502, "PayPal did not confirm the requested invoice amount. PayLeak did not save the invoice.", "PAYPAL_INVOICE_AMOUNT_MISMATCH", {
+      paypalInvoiceId: confirmed.id,
+    });
+  }
+  return confirmed;
+}
+
+export async function updatePaypalInvoiceRecord(
+  invoiceId: string,
+  input: PaypalInvoiceCreationInput,
+) {
+  const updated = await paypalRequest<PaypalInvoiceRecord | undefined>(
+    `/v2/invoicing/invoices/${encodeURIComponent(invoiceId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Prefer: "return=representation" },
+      body: JSON.stringify(buildPaypalInvoicePayload(input)),
+    },
+  );
+  const details = await getInvoiceDetails(invoiceId, () => undefined);
+  const confirmed = mergePaypalInvoice(updated ?? { id: invoiceId }, details);
+  const currencies = [
+    confirmed.detail?.currency_code,
+    confirmed.amount?.currency_code,
+    ...(confirmed.items?.map((item) => item.unit_amount?.currency_code) ?? []),
+  ].filter((code): code is string => Boolean(code));
+  if (currencies.some((code) => code !== input.currency)) {
+    throw new AppError(502, "PayPal did not confirm the requested invoice currency.", "PAYPAL_INVOICE_CURRENCY_MISMATCH");
+  }
+  if (!confirmed.amount?.value || !new Decimal(confirmed.amount.value).eq(input.amount)) {
+    throw new AppError(502, "PayPal did not confirm the requested invoice amount.", "PAYPAL_INVOICE_AMOUNT_MISMATCH");
+  }
+  if (confirmed.status && confirmed.status.toUpperCase() !== "DRAFT") {
+    throw new AppError(409, "PayPal no longer considers this invoice a draft, so it cannot be edited.", "PAYPAL_INVOICE_NOT_EDITABLE");
+  }
+  return confirmed;
 }
 
 export async function sendPaypalInvoiceRecord(invoiceId: string, requestId: string): Promise<PaypalInvoiceRecord> {
@@ -467,6 +564,13 @@ export function mapPaypalInvoice(userId: string, invoice: PaypalInvoiceRecord) {
     currency,
     subtotal: amountValue(total?.item_total),
     tax: amountValue(total?.tax_total),
+    lineItems: (invoice.items ?? []).flatMap((item) => {
+      const itemCurrency = item.unit_amount?.currency_code;
+      const itemAmount = item.unit_amount?.value;
+      const itemDescription = item.description || item.name;
+      if (!itemCurrency || itemCurrency !== currency || !itemAmount || !itemDescription) return [];
+      return [{ description: itemDescription, amount: itemAmount }];
+    }),
     description: description ?? "",
     invoiceDate,
     dueDate,
@@ -520,6 +624,9 @@ async function saveCreatedPaypalInvoice(
       $set: {
         ...mapped,
         clientId: input.clientId ?? null,
+        project: input.project ?? "",
+        services: input.services ?? [],
+        lineItems: input.lineItems ?? [],
         paypalRequestId: requestId,
         paypalLastSyncedAt: new Date(),
       },
@@ -543,6 +650,42 @@ export async function createPaypalInvoice(
   await ensurePaypalInvoiceIndex();
   const created = await createPaypalInvoiceRecord(input, requestId);
   return saveCreatedPaypalInvoice(String(owner._id), created, input, requestId);
+}
+
+export async function updatePaypalInvoiceDraft(
+  userId: string,
+  localInvoiceId: string,
+  input: PaypalInvoiceCreationInput,
+) {
+  const owner = await assertConfiguredOwner(userId);
+  const invoice = await Invoice.findOne({ _id: localInvoiceId, userId: owner._id });
+  if (!invoice) throw new AppError(404, "Invoice not found.", "INVOICE_NOT_FOUND");
+  if (invoice.source !== "paypal" || !invoice.paypalInvoiceId || invoice.status !== "Draft") {
+    throw new AppError(409, "Only a PayPal-linked draft can be edited.", "PAYPAL_INVOICE_MANAGED");
+  }
+  const confirmed = await updatePaypalInvoiceRecord(invoice.paypalInvoiceId, input);
+  const mapped = mapPaypalInvoice(String(owner._id), confirmed);
+  if (!mapped || mapped.status !== "Draft") {
+    throw new AppError(502, "PayPal did not confirm that the invoice remains a draft.", "PAYPAL_INVOICE_UPDATE_UNCONFIRMED");
+  }
+  const updated = await Invoice.findOneAndUpdate(
+    { _id: invoice._id, userId: owner._id, paypalInvoiceId: invoice.paypalInvoiceId, status: "Draft" },
+    {
+      $set: {
+        ...mapped,
+        clientId: input.clientId ?? invoice.clientId,
+        project: input.project ?? invoice.project,
+        services: input.services ?? invoice.services,
+        lineItems: input.lineItems ?? invoice.lineItems,
+        paypalRequestId: invoice.paypalRequestId,
+        paypalSendRequestId: invoice.paypalSendRequestId,
+        paypalLastSyncedAt: new Date(),
+      },
+    },
+    { new: true, runValidators: true },
+  ).lean();
+  if (!updated) throw new AppError(409, "The invoice changed while it was being edited. Refresh and retry.", "PAYPAL_INVOICE_CHANGED");
+  return updated;
 }
 
 export async function publishLocalInvoiceToPaypal(userId: string, localInvoiceId: string, requestId: string) {
@@ -569,6 +712,9 @@ export async function publishLocalInvoiceToPaypal(userId: string, localInvoiceId
     clientId: pendingInvoice.clientId ? String(pendingInvoice.clientId) : undefined,
     client: pendingInvoice.client,
     email: pendingInvoice.email,
+    project: pendingInvoice.project,
+    services: pendingInvoice.services,
+    lineItems: pendingInvoice.lineItems,
     amount: pendingInvoice.amount,
     currency: pendingInvoice.currency,
     description: pendingInvoice.description,

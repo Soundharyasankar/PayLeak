@@ -2,6 +2,7 @@ import { Invoice } from "../models/Invoice.js";
 
 const invoiceIndexName = "userId_1_paypalInvoiceId_1_paypal_unique";
 let indexSetup: Promise<void> | undefined;
+let assistantIndexSetup: Promise<void> | undefined;
 
 export async function ensurePaypalInvoiceIndex() {
   if (!indexSetup) {
@@ -33,4 +34,21 @@ export async function ensurePaypalInvoiceIndex() {
     });
   }
   await indexSetup;
+}
+
+export async function ensureAssistantInvoiceIndex() {
+  if (!assistantIndexSetup) {
+    assistantIndexSetup = Invoice.collection.createIndex(
+      { userId: 1, assistantSessionId: 1 },
+      {
+        unique: true,
+        partialFilterExpression: { assistantSessionId: { $type: "string" } },
+        name: "userId_1_assistantSessionId_1_unique",
+      },
+    ).then(() => undefined).catch((error: unknown) => {
+      assistantIndexSetup = undefined;
+      throw error;
+    });
+  }
+  await assistantIndexSetup;
 }

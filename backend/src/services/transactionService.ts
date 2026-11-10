@@ -6,7 +6,7 @@ import { calculateNetFromActual as calculateNetAmount } from "./financial.js";
 export async function listTransactions(userId: string, query: {
   page: number; limit: number; from?: Date; to?: Date; currency?: string; status?: string;
 }) {
-  const filter: Record<string, unknown> = { userId: new Types.ObjectId(userId) };
+  const filter: Record<string, unknown> = ownedTransactionFilter(userId);
   if (query.from || query.to) {
     filter.transactionDate = { ...(query.from ? { $gte: query.from } : {}), ...(query.to ? { $lte: query.to } : {}) };
   }
@@ -17,6 +17,18 @@ export async function listTransactions(userId: string, query: {
     Transaction.countDocuments(filter),
   ]);
   return { items: records.map(toFrontendTransaction), page: query.page, limit: query.limit, total };
+}
+
+export function ownedTransactionFilter(userId: string) {
+  return { userId: new Types.ObjectId(userId) };
+}
+
+export async function listOwnedTransactionsForFinancialAnalysis(userId: string, limit: number) {
+  return Transaction.find(ownedTransactionFilter(userId))
+    .select("clientId paypalTransactionId transactionType status grossAmount grossCurrency feeAmount feeCurrency feeSource paypalReportedNetAmount paypalReportedNetCurrency payleakCalculatedNetAmount payleakCalculatedNetCurrency conversion withdrawalFeeAmount withdrawalFeeCurrency transactionDate rawPaypal")
+    .sort({ transactionDate: -1 })
+    .limit(limit)
+    .lean();
 }
 
 async function findTransaction(userId: string, id: string) {

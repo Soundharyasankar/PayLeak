@@ -4,7 +4,24 @@ import { AppError } from "../utils/errors.js";
 
 export const errorMiddleware: ErrorRequestHandler = (error, _req, res, _next) => {
   if (error instanceof ZodError) {
-    res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Request validation failed", details: error.flatten() } });
+    const issues = error.issues.map((issue) => ({
+      field: issue.path.map(String).join(".") || "request",
+      message: issue.message,
+      code: issue.code,
+    }));
+    console.warn("API request validation failed", {
+      method: _req.method,
+      path: _req.path,
+      issues: issues.map(({ field, message, code }) => ({ field, message, code })),
+    });
+    const firstIssue = issues[0];
+    const message = firstIssue
+      ? `Invalid request field "${firstIssue.field}": ${firstIssue.message}`
+      : "Request validation failed.";
+    res.status(400).json({
+      success: false,
+      error: { code: "VALIDATION_ERROR", message, details: { issues } },
+    });
     return;
   }
   if (error instanceof AppError) {
