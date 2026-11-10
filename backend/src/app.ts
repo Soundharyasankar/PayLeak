@@ -35,7 +35,12 @@ export async function ensureDatabaseConnection() {
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({
-  origin: env.FRONTEND_URL,
+  origin: [
+    env.FRONTEND_URL,
+    "https://payleak-1.onrender.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ],
   credentials: true,
   methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Accept", "Authorization", "Content-Type", "Idempotency-Key"],

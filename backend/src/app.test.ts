@@ -41,6 +41,26 @@ test("health and protected route responses use the documented API envelope", asy
     assert.ok(invoiceAllowedHeaders.includes(header), `CORS preflight must allow ${header}`);
   }
 
+  const productionLoginPreflight = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://payleak-1.onrender.com",
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "content-type",
+    },
+  });
+  assert.equal(productionLoginPreflight.status, 204);
+  assert.equal(productionLoginPreflight.headers.get("access-control-allow-origin"), "https://payleak-1.onrender.com");
+  assert.equal(productionLoginPreflight.headers.get("access-control-allow-credentials"), "true");
+  assert.match(productionLoginPreflight.headers.get("access-control-allow-methods") ?? "", /\bPOST\b/);
+  assert.match(productionLoginPreflight.headers.get("access-control-allow-headers")?.toLowerCase() ?? "", /\bcontent-type\b/);
+
+  const productionHealth = await fetch(`${baseUrl}/api/health`, {
+    headers: { Origin: "https://payleak-1.onrender.com" },
+  });
+  assert.equal(productionHealth.headers.get("access-control-allow-origin"), "https://payleak-1.onrender.com");
+  assert.equal(productionHealth.headers.get("access-control-allow-credentials"), "true");
+
   const untrustedOriginPreflight = await fetch(`${baseUrl}/api/invoices`, {
     method: "OPTIONS",
     headers: {
@@ -49,7 +69,7 @@ test("health and protected route responses use the documented API envelope", asy
     },
   });
   assert.equal(untrustedOriginPreflight.status, 204);
-  assert.equal(untrustedOriginPreflight.headers.get("access-control-allow-origin"), "http://localhost:5173");
+  assert.equal(untrustedOriginPreflight.headers.get("access-control-allow-origin"), null);
   assert.notEqual(untrustedOriginPreflight.headers.get("access-control-allow-origin"), "*");
   assert.notEqual(untrustedOriginPreflight.headers.get("access-control-allow-origin"), "https://untrusted.example");
 
