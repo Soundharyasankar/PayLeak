@@ -55,7 +55,7 @@ export async function dashboardAnalytics(userId: string) {
     } else {
       gross.unavailableFeeCount += 1;
     }
-    if (transaction.conversion.source === "actual_paypal" || transaction.conversion.source === "paypal_quote") actualConversionCount += 1;
+    if (transaction.conversion?.source === "actual_paypal" || transaction.conversion?.source === "paypal_quote") actualConversionCount += 1;
     else conversionUnknownCount += 1;
   }
 

@@ -11,6 +11,9 @@ const schema = z.object({
   PAYPAL_MODE: z.enum(["sandbox", "live"]).default("sandbox"),
   PAYPAL_CLIENT_ID: z.string().optional().default(""),
   PAYPAL_CLIENT_SECRET: z.string().optional().default(""),
+  PAYPAL_BUSINESS_EMAIL: z.string().optional().default("sb-dld7b53656141@business.example.com"),
+  PAYPAL_BUYER_EMAIL: z.string().optional().default("sb-kcumg53769517@personal.example.com"),
+  PAYPAL_BUYER_PASSWORD: z.string().optional().default("HO*a>0Td"),
   PAYPAL_BASE_URL: z.string().url().default(
     process.env.PAYPAL_MODE === "live"
       ? "https://api-m.paypal.com"

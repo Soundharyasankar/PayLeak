@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { User } from "../models/User.js";
 import { AppError } from "../utils/errors.js";
+import { seedSandboxRecordsForUser } from "./seedSandboxData.js";
 
 const accessTokenLifetime = "8h";
 
@@ -16,6 +17,7 @@ export async function registerUser(input: { name: string; email: string; passwor
   const passwordHash = await bcrypt.hash(input.password, 12);
   try {
     const user = await User.create({ name: input.name.trim(), email, passwordHash });
+    await seedSandboxRecordsForUser(String(user._id));
     return { user: { id: String(user._id), name: user.name, email: user.email }, accessToken: issueToken(user) };
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === 11000) {
@@ -31,5 +33,6 @@ export async function loginUser(input: { email: string; password: string }) {
   if (!user || !(await bcrypt.compare(input.password, user.passwordHash))) {
     throw new AppError(401, "Email or password is incorrect.", "INVALID_CREDENTIALS");
   }
+  await seedSandboxRecordsForUser(String(user._id));
   return { user: { id: String(user._id), name: user.name, email: user.email }, accessToken: issueToken(user) };
 }

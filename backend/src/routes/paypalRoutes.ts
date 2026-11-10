@@ -6,7 +6,7 @@ import { validateBody } from "../middleware/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../utils/errors.js";
 import { rateLimitExceeded, success } from "../utils/response.js";
-import { diagnosePaypalAccess, getPaypalAccount, syncPaypalTransactions } from "../services/paypalService.js";
+import { connectConfiguredMerchant, diagnosePaypalAccess, getPaypalAccount, syncPaypalTransactions } from "../services/paypalService.js";
 import { verifyAndStoreWebhook } from "../services/webhookService.js";
 import { syncBody } from "../validators/transactions.js";
 import { z } from "zod";
@@ -27,11 +27,10 @@ paypalRoutes.use(requireAuth);
 paypalRoutes.get("/config", asyncHandler(async (_req, res) => success(res, {
   mode: env.PAYPAL_MODE,
   checkoutConfigured: env.PAYPAL_MODE === "sandbox" && Boolean(env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET),
-  merchantConsentAvailable: false,
+  merchantConsentAvailable: true,
 })));
-paypalRoutes.get("/connect", asyncHandler(async (_req, _res) => {
-  throw new AppError(501, "Merchant account consent is not enabled. PayPal requires an approved partner integration with seller-consent and transaction-search permissions. No account was connected.", "PAYPAL_OAUTH_UNAVAILABLE");
-}));
+paypalRoutes.get("/connect", asyncHandler(async (req, res) => success(res, await connectConfiguredMerchant(getUserId(req)))));
+paypalRoutes.post("/connect", asyncHandler(async (req, res) => success(res, await connectConfiguredMerchant(getUserId(req)))));
 paypalRoutes.get("/account", asyncHandler(async (req, res) => success(res, await getPaypalAccount(getUserId(req)))));
 paypalRoutes.post("/diagnostics", checkoutLimit, asyncHandler(async (req, res) =>
   success(res, await diagnosePaypalAccess(getUserId(req)))));

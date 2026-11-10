@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
 import { validateBody } from "../middleware/validate.js";
@@ -18,7 +19,9 @@ invoiceRoutes.use(requireAuth);
 
 invoiceRoutes.get("/", asyncHandler(async (req, res) => success(res, await listInvoices(getUserId(req)))));
 invoiceRoutes.post("/", validateBody(invoiceBody), asyncHandler(async (req, res) => {
-  const requestId = idempotencyKey.parse(req.header("Idempotency-Key"));
+  const rawKey = req.header("Idempotency-Key");
+  const parsedKey = idempotencyKey.safeParse(rawKey);
+  const requestId = parsedKey.success ? parsedKey.data : randomUUID();
   return success(res, await createInvoice(getUserId(req), req.body, requestId), 201);
 }));
 invoiceRoutes.post("/paypal/diagnostics", asyncHandler(async (req, res) =>
@@ -27,7 +30,9 @@ invoiceRoutes.post("/sync-paypal", asyncHandler(async (req, res) =>
   success(res, await syncPaypalInvoices(getUserId(req)))));
 invoiceRoutes.post("/:id/paypal", asyncHandler(async (req, res) => {
   const { id } = idParam.parse(req.params);
-  const requestId = idempotencyKey.parse(req.header("Idempotency-Key"));
+  const rawKey = req.header("Idempotency-Key");
+  const parsedKey = idempotencyKey.safeParse(rawKey);
+  const requestId = parsedKey.success ? parsedKey.data : randomUUID();
   return success(res, await publishInvoiceToPaypal(getUserId(req), id, requestId), 201);
 }));
 invoiceRoutes.get("/:id", asyncHandler(async (req, res) => {
