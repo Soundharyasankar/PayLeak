@@ -2,7 +2,7 @@
   "name": "payleak",
   "version": "1.0.0",
   "private": true,
-  "description": "PayLeak application workspace",
+  "description": "PayLeak monorepo",
   "scripts": {
     "dev": "concurrently \"npm run dev --prefix frontend\" \"npm run dev --prefix backend\"",
     "dev:frontend": "npm run dev --prefix frontend",
