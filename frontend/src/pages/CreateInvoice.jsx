@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Bot, CheckCircle2, FilePlus2, LoaderCircle, RotateCw, Send, Sparkles, Trash2 } from "lucide-react";
@@ -372,8 +371,4 @@ export default function CreateInvoice() {
       </Modal>}
     </div>
   );
-=======
-export default function CreateInvoice() {
-  return <main><h1>Create invoice</h1><p>Invoice creation will be built here.</p></main>;
->>>>>>> dcb877a2283b466bc7b3821e56fd18eed33a0452
 }
