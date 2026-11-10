@@ -1,4 +1,4 @@
-﻿# Demo flow
+# Demo flow
 
 1. Sign in to the dashboard.
 2. Connect a PayPal sandbox account.

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Download, Eye, FilePlus2, RefreshCw, Search, Send, SlidersHorizontal, Trash2 } from "lucide-react";
@@ -168,4 +169,8 @@ export default function Invoices() {
       </Modal>}
     </div>
   );
+=======
+export default function Invoices() {
+  return <main><h1>Invoices</h1><p>Your invoices will appear here.</p></main>;
+>>>>>>> dcb877a2283b466bc7b3821e56fd18eed33a0452
 }

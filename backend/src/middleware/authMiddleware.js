@@ -1,3 +1,3 @@
-﻿export function authMiddleware(_req, _res, next) {
+export function authMiddleware(_req, _res, next) {
   next();
 }

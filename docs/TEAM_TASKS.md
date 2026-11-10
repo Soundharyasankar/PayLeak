@@ -1,4 +1,4 @@
-﻿# Team tasks
+# Team tasks
 
 ## Member 1 — Frontend
 - Build dashboard and screens
