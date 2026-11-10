@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { validateBody, validateQuery } from "../middleware/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { success } from "../utils/response.js";
+import { success } from "../utils/response.ts";
 import { AppError } from "../utils/errors.js";
 import { Client } from "../models/Client.js";
 import { deleteClient, getClient, listClients } from "../services/clientService.js";

@@ -1,14 +1,14 @@
 import { Router } from "express";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { validateBody, validateQuery } from "../middleware/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { success } from "../utils/response.js";
+import { success } from "../utils/response.ts";
 import { z } from "zod";
 import { syncBody, transactionQuery } from "../validators/transactions.js";
-import { getTransaction, listTransactions, transactionBreakdown } from "../services/transactionService.js";
-import { refreshPaypalTransaction, syncPaypalTransactions } from "../services/paypalService.js";
+import { getTransaction, listTransactions, transactionBreakdown } from "../services/transactionService.ts";
+import { refreshPaypalTransaction, syncPaypalTransactions } from "../services/paypalService.ts";
 import { AppError } from "../utils/errors.js";
-import { createNotification } from "../services/notificationService.js";
+import { createNotification } from "../services/notificationService.ts";
 
 export const transactionRoutes = Router();
 transactionRoutes.use(requireAuth);

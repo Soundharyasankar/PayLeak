@@ -1,10 +1,10 @@
 import { Router } from "express";
-import { User } from "../models/User.js";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { User } from "../models/User.ts";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { validateBody } from "../middleware/validate.js";
 import { registerBody, loginBody } from "../validators/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { rateLimitExceeded, success } from "../utils/response.js";
+import { rateLimitExceeded, success } from "../utils/response.ts";
 import { loginUser, registerUser } from "../services/authService.js";
 import { AppError } from "../utils/errors.js";
 import { z } from "zod";

@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { Invoice } from "../models/Invoice.js";
+import { Invoice } from "../models/Invoice.ts";
 import { Notification } from "../models/Notification.js";
 import { AppError } from "../utils/errors.js";
 

@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { success } from "../utils/response.js";
-import { deleteNotification, draftReminder, listNotifications, markNotificationRead, sendReminder } from "../services/notificationService.js";
+import { success } from "../utils/response.ts";
+import { deleteNotification, draftReminder, listNotifications, markNotificationRead, sendReminder } from "../services/notificationService.ts";
 import { idParam } from "../validators/common.js";
 import { z } from "zod";
 import { AppError } from "../utils/errors.js";

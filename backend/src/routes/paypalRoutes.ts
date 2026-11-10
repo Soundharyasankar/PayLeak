@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { env } from "../config/env.js";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { validateBody } from "../middleware/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../utils/errors.js";
-import { rateLimitExceeded, success } from "../utils/response.js";
-import { diagnosePaypalAccess, getPaypalAccount, syncPaypalTransactions } from "../services/paypalService.js";
-import { verifyAndStoreWebhook } from "../services/webhookService.js";
+import { rateLimitExceeded, success } from "../utils/response.ts";
+import { diagnosePaypalAccess, getPaypalAccount, syncPaypalTransactions } from "../services/paypalService.ts";
+import { verifyAndStoreWebhook } from "../services/webhookService.ts";
 import { syncBody } from "../validators/transactions.js";
 import { z } from "zod";
 import { cancelSandboxOrder, captureSandboxOrder, createSandboxOrder } from "../services/paypalCheckoutService.js";

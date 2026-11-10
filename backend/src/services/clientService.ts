@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { Decimal } from "decimal.js";
 import { Client } from "../models/Client.js";
-import { Invoice } from "../models/Invoice.js";
+import { Invoice } from "../models/Invoice.ts";
 import { Transaction } from "../models/Transaction.js";
 import { AppError } from "../utils/errors.js";
 import { formatCurrencyAmount } from "../utils/money.js";

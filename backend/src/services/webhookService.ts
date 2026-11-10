@@ -1,5 +1,5 @@
 import { env } from "../config/env.js";
-import { WebhookEvent } from "../models/WebhookEvent.js";
+import { WebhookEvent } from "../models/WebhookEvent.ts";
 import { AppError } from "../utils/errors.js";
 import { paypalRequest } from "./paypalClient.js";
 

@@ -1,7 +1,7 @@
 import { env } from "../config/env.js";
 import { PayPalAccount } from "../models/PayPalAccount.js";
 import { Transaction } from "../models/Transaction.js";
-import { User } from "../models/User.js";
+import { User } from "../models/User.ts";
 import { AppError } from "../utils/errors.js";
 import { paypalRequest, verifyPaypalApplicationOAuth } from "./paypalClient.js";
 import { calculatePaypalTransactionValues, explainNetMismatch } from "./analytics/paypalCalculationService.js";

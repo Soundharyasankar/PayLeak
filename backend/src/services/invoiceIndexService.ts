@@ -1,4 +1,4 @@
-import { Invoice } from "../models/Invoice.js";
+import { Invoice } from "../models/Invoice.ts";
 
 const invoiceIndexName = "userId_1_paypalInvoiceId_1_paypal_unique";
 let indexSetup: Promise<void> | undefined;

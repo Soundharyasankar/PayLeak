@@ -1,6 +1,6 @@
 import { Decimal } from "decimal.js";
 import { Types } from "mongoose";
-import { FeeSchedule } from "../models/FeeSchedule.js";
+import { FeeSchedule } from "../models/FeeSchedule.ts";
 import { CurrencyConversion } from "../models/CurrencyConversion.js";
 import { PayPalExchangeRateQuote } from "../models/PayPalExchangeRateQuote.js";
 import { AppError } from "../utils/errors.js";

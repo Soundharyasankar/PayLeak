@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { validateBody } from "../middleware/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { rateLimitExceeded, success } from "../utils/response.js";
+import { rateLimitExceeded, success } from "../utils/response.ts";
 import { createInvoice, createLocalInvoiceDraft, deleteInvoice, getInvoice, listInvoices, publishInvoiceToPaypal, sendInvoice, updateInvoice } from "../services/invoiceService.js";
 import { invoiceBody, invoiceFields, validateInvoiceAmountPrecision } from "../validators/invoice.js";
 import { invoiceAssistantRequestSchema } from "../validators/invoiceAssistant.js";

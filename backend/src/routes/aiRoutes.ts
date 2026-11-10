@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { validateBody } from "../middleware/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { rateLimitExceeded, success } from "../utils/response.js";
+import { rateLimitExceeded, success } from "../utils/response.ts";
 import { diagnoseGemini, explainFinancialData } from "../services/aiService.js";
 import { answerFinancialAgent, createClientFinancialReport, downloadFinancialReport, getDatePeriod } from "../services/clientFinancialService.js";
 import { rateLimit } from "express-rate-limit";

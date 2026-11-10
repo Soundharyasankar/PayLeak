@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
-import { User } from "../models/User.js";
+import { User } from "../models/User.ts";
 import { AppError } from "../utils/errors.js";
 
 const accessTokenLifetime = "8h";

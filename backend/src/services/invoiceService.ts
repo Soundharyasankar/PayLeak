@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { Decimal } from "decimal.js";
 import { Client } from "../models/Client.js";
-import { Invoice } from "../models/Invoice.js";
+import { Invoice } from "../models/Invoice.ts";
 import { AppError } from "../utils/errors.js";
 import { ensureAssistantInvoiceIndex } from "./invoiceIndexService.js";
 import { createPaypalInvoice, publishLocalInvoiceToPaypal, sendPaypalInvoice, updatePaypalInvoiceDraft } from "./paypalInvoiceService.js";

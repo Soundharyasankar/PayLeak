@@ -2,10 +2,10 @@ import { Decimal } from "decimal.js";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { paypalInvoiceCurrencies } from "../config/paypalCurrencies.js";
-import { Invoice } from "../models/Invoice.js";
+import { Invoice } from "../models/Invoice.ts";
 import { AppError } from "../utils/errors.js";
 import { calculateInvoiceLineItemTotal, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
-import { assertConfiguredOwner } from "./paypalService.js";
+import { assertConfiguredOwner } from "./paypalService.ts";
 import { ensurePaypalInvoiceIndex } from "./invoiceIndexService.js";
 import { paypalRequest, verifyPaypalInvoiceOAuth } from "./paypalClient.js";
 

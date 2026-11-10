@@ -3,11 +3,11 @@ import PDFDocument from "pdfkit";
 import { Types } from "mongoose";
 import { Client } from "../models/Client.js";
 import { FinancialReport } from "../models/FinancialReport.js";
-import { Invoice } from "../models/Invoice.js";
+import { Invoice } from "../models/Invoice.ts";
 import { AppError } from "../utils/errors.js";
 import { formatCurrencyAmount } from "../utils/money.js";
 import { generateFinancialAgentAnswer } from "./aiService.js";
-import { listOwnedTransactionsForFinancialAnalysis } from "./transactionService.js";
+import { listOwnedTransactionsForFinancialAnalysis } from "./transactionService.ts";
 
 type MoneyTotals = Map<string, Decimal>;
 type ClientRecord = {

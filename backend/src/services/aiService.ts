@@ -1,7 +1,7 @@
 import { ApiError, GoogleGenAI, type Content } from "@google/genai";
 import { env } from "../config/env.js";
 import { CurrencyConversion } from "../models/CurrencyConversion.js";
-import { Invoice } from "../models/Invoice.js";
+import { Invoice } from "../models/Invoice.ts";
 import { Transaction } from "../models/Transaction.js";
 import { AppError } from "../utils/errors.js";
 import { z } from "zod";

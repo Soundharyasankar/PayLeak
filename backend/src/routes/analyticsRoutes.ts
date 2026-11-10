@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { success } from "../utils/response.js";
+import { success } from "../utils/response.ts";
 import { dashboardAnalytics, leakAnalytics, monthlyAnalytics, clientAnalytics, currencyAnalytics } from "../services/analyticsService.js";
-import { transactionBreakdown } from "../services/transactionService.js";
+import { transactionBreakdown } from "../services/transactionService.ts";
 import { z } from "zod";
 import { rateLimit } from "express-rate-limit";
-import { rateLimitExceeded } from "../utils/response.js";
+import { rateLimitExceeded } from "../utils/response.ts";
 import { analyzeOwnedTransaction } from "../services/transactionAnalysisService.js";
 
 export const analyticsRoutes = Router();

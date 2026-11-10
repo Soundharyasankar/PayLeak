@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { requireAuth, getUserId } from "../middleware/authMiddleware.js";
+import { requireAuth, getUserId } from "../middleware/authMiddleware.ts";
 import { validateBody } from "../middleware/validate.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { success } from "../utils/response.js";
+import { success } from "../utils/response.ts";
 import { currencyCode, decimalString, idParam } from "../validators/common.js";
 import { z } from "zod";
 import { calculateFromQuote, getConversion, latestPayPalRate, listFeeSchedules, listRates, requestPayPalQuote } from "../services/currencyService.js";
