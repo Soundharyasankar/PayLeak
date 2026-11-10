@@ -13,6 +13,7 @@ import { rateLimit } from "express-rate-limit";
 export const authRoutes = Router();
 const loginRegisterLimit = rateLimit({ windowMs: 15 * 60_000, limit: 15, standardHeaders: true, legacyHeaders: false, handler: rateLimitExceeded });
 const accessCookieName = "payleak_access";
+const accessCookieSameSite = process.env.NODE_ENV === "production" ? "none" as const : "lax" as const;
 const profileBody = z.object({
   name: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(254),
@@ -20,7 +21,7 @@ const profileBody = z.object({
 const accessCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "lax" as const,
+  sameSite: accessCookieSameSite,
   path: "/",
   maxAge: 8 * 60 * 60 * 1000,
 };
@@ -63,7 +64,7 @@ authRoutes.post("/logout", (_req, res) => {
   res.clearCookie(accessCookieName, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: accessCookieSameSite,
     path: "/",
   });
   return res.status(204).end();
