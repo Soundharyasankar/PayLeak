@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import mongoose from "mongoose";
+import { connectDatabase } from "./config/database.js";
 import { env } from "./config/env.js";
 import { errorMiddleware } from "./middleware/errorMiddleware.js";
 import { aiRoutes } from "./routes/aiRoutes.js";
@@ -18,6 +19,18 @@ import { rateLimitExceeded } from "./utils/response.js";
 
 export const app = express();
 const apiLimit = rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false, handler: rateLimitExceeded });
+let databaseConnection: Promise<void> | null = null;
+
+export async function ensureDatabaseConnection() {
+  if (mongoose.connection.readyState === 1) return;
+  if (!databaseConnection) {
+    databaseConnection = connectDatabase().catch((error: unknown) => {
+      databaseConnection = null;
+      throw error;
+    });
+  }
+  await databaseConnection;
+}
 
 app.disable("x-powered-by");
 app.use(helmet());
@@ -29,6 +42,13 @@ app.use(cors({
   optionsSuccessStatus: 204,
 }));
 app.use(express.json({ limit: "1mb" }));
+app.use((_req, _res, next) => {
+  if (env.NODE_ENV === "test") {
+    next();
+    return;
+  }
+  void ensureDatabaseConnection().then(() => next(), next);
+});
 app.use("/api", apiLimit);
 
 app.get(["/health", "/api/health"], (_req, res) => res.json({
@@ -53,3 +73,5 @@ app.use("/api/ai", aiRoutes);
 
 app.use((_req, res) => res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "API endpoint not found." } }));
 app.use(errorMiddleware);
+
+export default app;

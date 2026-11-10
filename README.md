@@ -77,6 +77,30 @@ API contracts are documented in
 [`docs/API_CONTRACTS.md`](./docs/API_CONTRACTS.md). Backend startup must
 successfully connect to MongoDB before Express begins listening.
 
+## Vercel multi-service deployment
+
+The root [`vercel.json`](./vercel.json) defines two services: the Vite frontend
+and Express backend. Deploy from the repository root. Requests under `/api/`
+are routed to the backend; all other paths are routed to the frontend. The
+frontend uses the same-origin `/api` base path in production and Vite proxies
+that path to `localhost:5000` during local development.
+
+The Express app is exported for Vercel's function runtime and establishes a
+MongoDB connection on demand before handling requests. Its normal local server
+still connects before listening.
+
+Configure backend environment variables in the Vercel project settings:
+`MONGODB_URI`, `JWT_SECRET`, and `FRONTEND_URL` are required for deployment.
+Set `FRONTEND_URL` to the canonical deployed application URL so PayPal return
+links point to the deployed frontend. Configure `GEMINI_API_KEY` and the
+appropriate PayPal credentials and mode for the integrations you intend to use.
+Do not configure `VITE_API_BASE_URL` for the same-domain deployment unless
+intentionally overriding `/api`.
+
+The `ai-service/` directory contains prompt prototypes, not a separately
+deployable runtime service. The active Gemini integration is part of the
+backend. There are currently no Vercel service-to-service bindings.
+
 ## Project structure
 
 - `frontend/` — React app, authenticated UI, and API services

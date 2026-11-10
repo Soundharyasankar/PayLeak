@@ -1,10 +1,9 @@
-import { app } from "./app.js";
-import { connectDatabase } from "./config/database.js";
+import { app, ensureDatabaseConnection } from "./app.js";
 import { env } from "./config/env.js";
 import mongoose from "mongoose";
 
 async function start() {
-  await connectDatabase();
+  await ensureDatabaseConnection();
   const server = app.listen(env.PORT, () => {
     console.log(`Server running on port ${env.PORT}`);
   });
