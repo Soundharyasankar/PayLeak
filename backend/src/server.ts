@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 
 async function start() {
   await ensureDatabaseConnection();
-  const server = app.listen(env.PORT, () => {
+  const server = app.listen(env.PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${env.PORT}`);
   });
   const shutdown = (signal: string) => {
