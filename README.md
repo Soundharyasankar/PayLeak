@@ -85,10 +85,12 @@ are routed to the backend; all other paths are routed to the frontend. The
 frontend uses the same-origin `/api` base path in production and Vite proxies
 that path to `localhost:5000` during local development.
 
-The backend service runs its TypeScript build and uses the compiled
-`dist/app.js` as its Vercel entrypoint. The Express app establishes a MongoDB
-connection on demand before handling requests. Its normal local server still
-connects before listening.
+The backend service runs its TypeScript build and uses `src/app.ts` as its
+Vercel Express entrypoint. Vercel's Express runtime supports TypeScript
+entrypoints; the build artifact is emitted at `backend/dist/app.js` for the
+normal Node.js start script. The Express app establishes a MongoDB connection
+on demand before handling requests. Its normal local server still connects
+before listening.
 
 Configure backend environment variables in the Vercel project settings:
 `MONGODB_URI`, `JWT_SECRET`, and `FRONTEND_URL` are required for deployment.
