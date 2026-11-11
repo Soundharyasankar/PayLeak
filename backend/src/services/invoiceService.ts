@@ -6,9 +6,10 @@ import { AppError } from "../utils/errors.js";
 import { ensureAssistantInvoiceIndex } from "./invoiceIndexService.js";
 import { createPaypalInvoice, publishLocalInvoiceToPaypal, sendPaypalInvoice, updatePaypalInvoiceDraft } from "./paypalInvoiceService.js";
 import { calculateInvoiceLineItemTotal, normalizeInvoiceLineItems, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
+import { sharedPaypalInvoiceFilter } from "./paypalIntegrationService.js";
 
 export async function listInvoices(userId: string) {
-  const invoices = await Invoice.find({ userId }).sort({ createdAt: -1 }).lean();
+  const invoices = await Invoice.find(await sharedPaypalInvoiceFilter(userId)).sort({ createdAt: -1 }).lean();
   return invoices.map(toFrontendInvoice);
 }
 
@@ -75,7 +76,7 @@ export async function publishInvoiceToPaypal(userId: string, id: string, request
 }
 
 export async function getInvoice(userId: string, id: string) {
-  const invoice = await Invoice.findOne({ _id: id, userId }).lean();
+  const invoice = await Invoice.findOne({ _id: id, ...await sharedPaypalInvoiceFilter(userId) }).lean();
   if (!invoice) throw new AppError(404, "Invoice not found.", "INVOICE_NOT_FOUND");
   return toFrontendInvoice(invoice);
 }
@@ -123,7 +124,7 @@ export async function updateInvoice(userId: string, id: string, input: Partial<{
   clientId: string; client: string; email: string; project: string; services: string[];
   lineItems: InvoiceLineItem[]; amount: string; currency: string; description: string; date: Date; due: Date;
 }>) {
-  const existing = await Invoice.findOne({ _id: id, userId }).select(
+  const existing = await Invoice.findOne({ _id: id, ...await sharedPaypalInvoiceFilter(userId) }).select(
     "source status clientId client email project services lineItems amount currency description invoiceDate dueDate",
   );
   if (!existing) throw new AppError(404, "Invoice not found.", "INVOICE_NOT_FOUND");

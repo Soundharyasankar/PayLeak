@@ -2,11 +2,12 @@ import { Types } from "mongoose";
 import { Transaction } from "../models/Transaction.js";
 import { AppError } from "../utils/errors.js";
 import { calculateNetFromActual as calculateNetAmount } from "./financial.js";
+import { sharedPaypalDataFilter } from "./paypalIntegrationService.js";
 
 export async function listTransactions(userId: string, query: {
   page: number; limit: number; from?: Date; to?: Date; currency?: string; status?: string;
 }) {
-  const filter: Record<string, unknown> = ownedTransactionFilter(userId);
+  const filter: Record<string, unknown> = await sharedPaypalDataFilter(userId);
   if (query.from || query.to) {
     filter.transactionDate = { ...(query.from ? { $gte: query.from } : {}), ...(query.to ? { $lte: query.to } : {}) };
   }
@@ -24,7 +25,7 @@ export function ownedTransactionFilter(userId: string) {
 }
 
 export async function listOwnedTransactionsForFinancialAnalysis(userId: string, limit: number) {
-  return Transaction.find(ownedTransactionFilter(userId))
+  return Transaction.find(await sharedPaypalDataFilter(userId))
     .select("clientId paypalTransactionId transactionType status grossAmount grossCurrency feeAmount feeCurrency feeSource paypalReportedNetAmount paypalReportedNetCurrency payleakCalculatedNetAmount payleakCalculatedNetCurrency conversion withdrawalFeeAmount withdrawalFeeCurrency transactionDate rawPaypal")
     .sort({ transactionDate: -1 })
     .limit(limit)
@@ -34,7 +35,9 @@ export async function listOwnedTransactionsForFinancialAnalysis(userId: string, 
 async function findTransaction(userId: string, id: string) {
   const alternatives: Record<string, unknown>[] = [{ paypalTransactionId: id }];
   if (Types.ObjectId.isValid(id)) alternatives.push({ _id: new Types.ObjectId(id) });
-  const record = await Transaction.findOne({ userId, $or: alternatives }).lean();
+  const record = await Transaction.findOne({
+    $and: [await sharedPaypalDataFilter(userId), { $or: alternatives }],
+  }).lean();
   if (!record) throw new AppError(404, "Transaction not found.", "TRANSACTION_NOT_FOUND");
   return record;
 }

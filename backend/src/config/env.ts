@@ -17,6 +17,10 @@ const schema = z.object({
       : "https://api-m.sandbox.paypal.com",
   ),
   PAYPAL_WEBHOOK_ID: z.string().optional().default(""),
+  PAYPAL_SHARED_DATA_NAMESPACE_ID: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.string().regex(/^[a-f\d]{24}$/i, "PAYPAL_SHARED_DATA_NAMESPACE_ID must be a MongoDB ObjectId.").optional(),
+  ),
   PAYPAL_ACCOUNT_OWNER_USER_ID: z.preprocess(
     (value) => value === "" ? undefined : value,
     z.string().regex(/^[a-f\d]{24}$/i, "PAYPAL_ACCOUNT_OWNER_USER_ID must be a MongoDB user ID.").optional(),
@@ -31,13 +35,6 @@ const schema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["PAYPAL_BASE_URL"],
       message: `PAYPAL_BASE_URL must use ${expectedHost} for PAYPAL_MODE=${config.PAYPAL_MODE}.`,
-    });
-  }
-  if (process.env.PAYPAL_ACCOUNT_OWNER_EMAIL && !config.PAYPAL_ACCOUNT_OWNER_USER_ID) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["PAYPAL_ACCOUNT_OWNER_USER_ID"],
-      message: "Email-based merchant ownership is no longer accepted; bind the designated PayLeak user by immutable MongoDB user ID.",
     });
   }
 });

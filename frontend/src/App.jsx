@@ -7,6 +7,7 @@ import AppLayout from "./layouts/AppLayout.jsx";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
 const Register = lazy(() => import("./pages/Register.jsx"));
+const PaypalConnected = lazy(() => import("./pages/PaypalConnected.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
 const ConnectPayPal = lazy(() => import("./pages/ConnectPayPal.jsx"));
 const SandboxCheckout = lazy(() => import("./pages/SandboxCheckout.jsx"));
@@ -22,7 +23,7 @@ const Settings = lazy(() => import("./pages/Settings.jsx"));
 const TransactionHistory = lazy(() => import("./pages/TransactionHistory.jsx"));
 
 function AppRoutes() {
-  const { isAuthenticated, status } = useAuth();
+  const { isAuthenticated, paypalWelcomePending, status } = useAuth();
   const location = useLocation();
 
   if (status === "loading") {
@@ -34,7 +35,7 @@ function AppRoutes() {
   }
 
   if (isAuthenticated && ["/login", "/register"].includes(location.pathname)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={paypalWelcomePending ? "/paypal-connected" : "/"} replace />;
   }
 
   return (
@@ -42,6 +43,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/paypal-connected" element={<PaypalConnected />} />
         <Route path="/connect-paypal" element={<ConnectPayPal />} />
         <Route path="/paypal/sandbox-checkout" element={<SandboxCheckout />} />
         <Route path="/paypal/return" element={<PayPalCaptureReturn />} />

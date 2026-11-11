@@ -1,11 +1,12 @@
 import { Decimal } from "decimal.js";
 import { randomUUID } from "node:crypto";
+import { Types } from "mongoose";
 import { env } from "../config/env.js";
 import { paypalInvoiceCurrencies } from "../config/paypalCurrencies.js";
 import { Invoice } from "../models/Invoice.ts";
 import { AppError } from "../utils/errors.js";
 import { calculateInvoiceLineItemTotal, normalizeInvoiceLineItems, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
-import { assertConfiguredOwner } from "./paypalService.ts";
+import { getSharedPaypalIntegration, sharedPaypalInvoiceFilter, updateSharedPaypalIntegration } from "./paypalIntegrationService.js";
 import { ensurePaypalInvoiceIndex } from "./invoiceIndexService.js";
 import { paypalRequest, verifyPaypalInvoiceOAuth } from "./paypalClient.js";
 
@@ -177,9 +178,9 @@ function extractError(error: unknown) {
       debugId: null,
     };
   }
-  const details = error.details && typeof error.details === "object"
-    ? error.details as Record<string, unknown>
-    : {};
+  const details = error.diagnostic && typeof error.diagnostic === "object"
+    ? error.diagnostic as Record<string, unknown>
+    : (error.details && typeof error.details === "object" ? error.details as Record<string, unknown> : {});
   return {
     httpStatus: typeof details.httpStatus === "number" ? details.httpStatus : null,
     name: typeof details.paypalErrorName === "string" ? details.paypalErrorName : null,
@@ -192,15 +193,28 @@ function invoiceError(
   error: unknown,
   context: Record<string, unknown>,
 ) {
-  const details = error instanceof AppError && error.details && typeof error.details === "object"
-    ? error.details as Record<string, unknown>
-    : {};
+  const details = error instanceof AppError && error.diagnostic && typeof error.diagnostic === "object"
+    ? error.diagnostic as Record<string, unknown>
+    : (error instanceof AppError && error.details && typeof error.details === "object"
+      ? error.details as Record<string, unknown>
+      : {});
   const apiError = extractError(error);
+  const permissionDenied = apiError.httpStatus === 403;
   return new AppError(
     error instanceof AppError ? error.statusCode : 502,
     error instanceof AppError ? error.message : "PayPal invoice synchronization failed.",
     error instanceof AppError ? error.code : "PAYPAL_INVOICE_SYNC_FAILED",
-    { ...context, ...details, paypalApiError: apiError },
+    undefined,
+    {
+      ...context,
+      ...details,
+      ...(permissionDenied ? {
+        invoiceApiAccess: "permission_denied",
+        invoiceReadPermission: "permission_denied",
+      } : {}),
+      ...(apiError.httpStatus !== null ? { paypalHttpStatus: apiError.httpStatus } : {}),
+      paypalApiError: apiError,
+    },
   );
 }
 
@@ -393,15 +407,15 @@ export async function getAllPaypalInvoicePages() {
   return { invoices, pages, paypalTotalItems, paypalTotalPages, duplicateInvoicesSkipped };
 }
 
-async function getOwnerInvoiceCount(userId: string) {
-  return Invoice.countDocuments({ userId });
+async function getSharedInvoiceCount(dataScopeId: Types.ObjectId) {
+  return Invoice.countDocuments({ userId: dataScopeId });
 }
 
 export async function diagnosePaypalInvoiceAccess(userId: string) {
-  const owner = await assertConfiguredOwner(userId);
+  const integration = await getSharedPaypalIntegration(userId);
+  const dataScopeId = integration.dataScopeId;
   const result = {
-    payLeakUserId: String(owner._id),
-    ownerBinding: "verified",
+    integrationScope: "shared",
     environment: env.PAYPAL_MODE,
     applicationOAuth: "not_tested",
     paypalApplicationId: null as string | null,
@@ -421,7 +435,7 @@ export async function diagnosePaypalInvoiceAccess(userId: string) {
     invoicesInserted: 0,
     invoicesUpdated: 0,
     duplicateInvoicesSkipped: 0,
-    totalInvoicesStoredInMongoDB: await getOwnerInvoiceCount(String(owner._id)),
+    totalInvoicesStoredInMongoDB: await getSharedInvoiceCount(dataScopeId),
     paypalApiError: null as ReturnType<typeof extractError> | null,
     guidance: "",
   };
@@ -439,7 +453,7 @@ export async function diagnosePaypalInvoiceAccess(userId: string) {
   }
 
   const successfulCreate = await Invoice.exists({
-    userId: owner._id,
+    userId: dataScopeId,
     source: "paypal",
     paypalInvoiceId: { $type: "string" },
     paypalRequestId: { $type: "string" },
@@ -452,16 +466,27 @@ export async function diagnosePaypalInvoiceAccess(userId: string) {
     result.paypalTotalItems = firstPage.total_items ?? null;
     result.paypalTotalPages = firstPage.total_pages ?? null;
     result.invoicesRetrieved = firstPage.items?.length ?? 0;
-    result.invoiceApiAccess = "verified";
+    result.invoiceApiAccess = "authorized";
     result.invoiceReadPermission = "verified_by_api_request";
+    await updateSharedPaypalIntegration(userId, {
+      $set: { "capabilities.invoicing": true },
+    });
     result.guidance = result.invoiceCreatePermission === "verified_by_successful_create"
       ? "PayPal invoice listing and a prior PayLeak invoice creation both succeeded. Invoice sending is not yet tested; verify the REST app is associated with the intended Sandbox Business account."
       : "PayPal invoice listing succeeded. OAuth scope claims are reported separately; create access has not been tested until PayLeak creates a draft. Sending remains untested.";
   } catch (error) {
-    result.invoiceApiAccess = "denied";
-    result.paypalApiError = extractError(error);
-    result.paypalHttpStatus = result.paypalApiError.httpStatus;
-    result.guidance = result.paypalApiError.httpStatus === 403
+    const apiError = extractError(error);
+    result.paypalApiError = apiError;
+    const httpStatus = result.paypalHttpStatus ?? apiError.httpStatus;
+    result.invoiceApiAccess = httpStatus === 403 ? "permission_denied" : "unavailable";
+    result.invoiceReadPermission = httpStatus === 403 ? "permission_denied" : "not_verified";
+    if (httpStatus === 403) {
+      await updateSharedPaypalIntegration(userId, {
+        $set: { "capabilities.invoicing": false },
+      });
+    }
+    result.paypalHttpStatus = httpStatus;
+    result.guidance = httpStatus === 403
       ? "PayPal denied invoice access. The REST app or Sandbox Business account must be granted the Invoicing API read permission."
       : "The PayPal Invoice API request failed.";
   }
@@ -604,6 +629,7 @@ async function saveCreatedPaypalInvoice(
   input: PaypalInvoiceCreationInput,
   requestId: string,
   existingInvoiceId?: string,
+  existingInvoiceOwnerId?: Types.ObjectId,
 ) {
   const lineItems = normalizeInvoiceLineItems(
     input.lineItems,
@@ -620,14 +646,14 @@ async function saveCreatedPaypalInvoice(
     });
   }
   const invoiceFilter = existingInvoiceId
-    ? { _id: existingInvoiceId, userId, source: "payleak", paypalInvoiceId: { $exists: false } }
+    ? { _id: existingInvoiceId, userId: existingInvoiceOwnerId, source: "payleak", paypalInvoiceId: { $exists: false } }
     : { userId, paypalInvoiceId: mapped.paypalInvoiceId };
   const invoice = await Invoice.findOneAndUpdate(
     invoiceFilter,
     {
       $set: {
         ...mapped,
-        clientId: input.clientId ?? null,
+        clientId: null,
         project: input.project ?? "",
         services: input.services?.length ? input.services : lineItems.map(({ description }) => description),
         lineItems,
@@ -650,10 +676,10 @@ export async function createPaypalInvoice(
   input: PaypalInvoiceCreationInput,
   requestId: string,
 ) {
-  const owner = await assertConfiguredOwner(userId);
+  const integration = await getSharedPaypalIntegration(userId);
   await ensurePaypalInvoiceIndex();
   const created = await createPaypalInvoiceRecord(input, requestId);
-  return saveCreatedPaypalInvoice(String(owner._id), created, input, requestId);
+  return saveCreatedPaypalInvoice(String(integration.dataScopeId), created, input, requestId);
 }
 
 export async function updatePaypalInvoiceDraft(
@@ -661,23 +687,24 @@ export async function updatePaypalInvoiceDraft(
   localInvoiceId: string,
   input: PaypalInvoiceCreationInput,
 ) {
-  const owner = await assertConfiguredOwner(userId);
-  const invoice = await Invoice.findOne({ _id: localInvoiceId, userId: owner._id });
+  const integration = await getSharedPaypalIntegration(userId);
+  const invoiceFilter = await sharedPaypalInvoiceFilter(userId);
+  const invoice = await Invoice.findOne({ _id: localInvoiceId, ...invoiceFilter });
   if (!invoice) throw new AppError(404, "Invoice not found.", "INVOICE_NOT_FOUND");
   if (invoice.source !== "paypal" || !invoice.paypalInvoiceId || invoice.status !== "Draft") {
     throw new AppError(409, "Only a PayPal-linked draft can be edited.", "PAYPAL_INVOICE_MANAGED");
   }
   const confirmed = await updatePaypalInvoiceRecord(invoice.paypalInvoiceId, input);
-  const mapped = mapPaypalInvoice(String(owner._id), confirmed);
+  const mapped = mapPaypalInvoice(String(integration.dataScopeId), confirmed);
   if (!mapped || mapped.status !== "Draft") {
     throw new AppError(502, "PayPal did not confirm that the invoice remains a draft.", "PAYPAL_INVOICE_UPDATE_UNCONFIRMED");
   }
   const updated = await Invoice.findOneAndUpdate(
-    { _id: invoice._id, userId: owner._id, paypalInvoiceId: invoice.paypalInvoiceId, status: "Draft" },
+    { _id: invoice._id, paypalInvoiceId: invoice.paypalInvoiceId, status: "Draft" },
     {
       $set: {
         ...mapped,
-        clientId: input.clientId ?? invoice.clientId,
+        clientId: null,
         project: input.project ?? invoice.project,
         services: input.services ?? invoice.services,
         lineItems: input.lineItems ?? invoice.lineItems,
@@ -693,8 +720,8 @@ export async function updatePaypalInvoiceDraft(
 }
 
 export async function publishLocalInvoiceToPaypal(userId: string, localInvoiceId: string, requestId: string) {
-  const owner = await assertConfiguredOwner(userId);
-  const invoice = await Invoice.findOne({ _id: localInvoiceId, userId: owner._id });
+  const integration = await getSharedPaypalIntegration(userId);
+  const invoice = await Invoice.findOne({ _id: localInvoiceId, userId });
   if (!invoice) throw new AppError(404, "Invoice not found.", "INVOICE_NOT_FOUND");
   if (invoice.source === "paypal" && invoice.paypalInvoiceId) return invoice.toObject();
   if (invoice.source !== "payleak" || invoice.status !== "Draft" || invoice.paypalInvoiceId) {
@@ -702,11 +729,11 @@ export async function publishLocalInvoiceToPaypal(userId: string, localInvoiceId
   }
   if (!invoice.paypalRequestId) {
     await Invoice.updateOne(
-      { _id: invoice._id, userId: owner._id, source: "payleak", paypalInvoiceId: { $exists: false }, paypalRequestId: { $exists: false } },
+      { _id: invoice._id, userId, source: "payleak", paypalInvoiceId: { $exists: false }, paypalRequestId: { $exists: false } },
       { $set: { paypalRequestId: requestId } },
     );
   }
-  const pendingInvoice = await Invoice.findOne({ _id: invoice._id, userId: owner._id });
+  const pendingInvoice = await Invoice.findOne({ _id: invoice._id, userId });
   if (!pendingInvoice || pendingInvoice.source !== "payleak" || pendingInvoice.paypalInvoiceId) {
     if (pendingInvoice?.source === "paypal" && pendingInvoice.paypalInvoiceId) return pendingInvoice.toObject();
     throw new AppError(409, "The invoice changed before PayPal creation could begin. Refresh and retry.", "PAYPAL_INVOICE_CHANGED");
@@ -753,18 +780,26 @@ export async function publishLocalInvoiceToPaypal(userId: string, localInvoiceId
       "PAYPAL_INVALID_REQUEST",
     ].includes(error.code)) {
       await Invoice.updateOne(
-        { _id: pendingInvoice._id, userId: owner._id, paypalRequestId: stableRequestId, paypalInvoiceId: { $exists: false } },
+        { _id: pendingInvoice._id, userId, paypalRequestId: stableRequestId, paypalInvoiceId: { $exists: false } },
         { $unset: { paypalRequestId: 1 } },
       );
     }
     throw error;
   }
-  return saveCreatedPaypalInvoice(String(owner._id), created, input, stableRequestId, String(pendingInvoice._id));
+  return saveCreatedPaypalInvoice(
+    String(integration.dataScopeId),
+    created,
+    input,
+    stableRequestId,
+    String(pendingInvoice._id),
+    pendingInvoice.userId,
+  );
 }
 
 export async function sendPaypalInvoice(userId: string, localInvoiceId: string) {
-  const owner = await assertConfiguredOwner(userId);
-  const invoice = await Invoice.findOne({ _id: localInvoiceId, userId: owner._id });
+  const integration = await getSharedPaypalIntegration(userId);
+  const invoiceFilter = await sharedPaypalInvoiceFilter(userId);
+  const invoice = await Invoice.findOne({ _id: localInvoiceId, ...invoiceFilter });
   if (!invoice) throw new AppError(404, "Invoice not found.", "INVOICE_NOT_FOUND");
   if (invoice.source !== "paypal" || !invoice.paypalInvoiceId) {
     throw new AppError(409, "This local invoice has not been created in PayPal. Create it through PayLeak before sending.", "PAYPAL_INVOICE_NOT_LINKED");
@@ -786,7 +821,7 @@ export async function sendPaypalInvoice(userId: string, localInvoiceId: string) 
     });
   }
 
-  const mapped = mapPaypalInvoice(String(owner._id), {
+  const mapped = mapPaypalInvoice(String(integration.dataScopeId), {
     ...confirmed,
     create_time: confirmed.create_time ?? invoice.invoiceDate.toISOString(),
     detail: {
@@ -811,7 +846,7 @@ export async function sendPaypalInvoice(userId: string, localInvoiceId: string) 
     });
   }
   const updated = await Invoice.findOneAndUpdate(
-    { _id: invoice._id, userId: owner._id, paypalInvoiceId: invoice.paypalInvoiceId },
+    { _id: invoice._id, paypalInvoiceId: invoice.paypalInvoiceId },
     { $set: { ...mapped, paypalRequestId: invoice.paypalRequestId, paypalSendRequestId: requestId, paypalLastSyncedAt: new Date() } },
     { new: true, runValidators: true },
   ).lean();
@@ -824,14 +859,20 @@ export async function sendPaypalInvoice(userId: string, localInvoiceId: string) 
 }
 
 export async function syncPaypalInvoices(userId: string) {
-  const owner = await assertConfiguredOwner(userId);
-  const ownerId = String(owner._id);
+  const integration = await getSharedPaypalIntegration(userId);
+  const ownerId = String(integration.dataScopeId);
   let oauth: Awaited<ReturnType<typeof verifyPaypalInvoiceOAuth>>;
   try {
     oauth = await verifyPaypalInvoiceOAuth();
   } catch (error) {
+    const apiError = extractError(error);
+    if (apiError.httpStatus === 403) {
+      await updateSharedPaypalIntegration(userId, {
+        $set: { "capabilities.invoicing": false },
+      });
+    }
     throw invoiceError(error, {
-      payLeakUserId: ownerId,
+      integrationScope: "shared",
       environment: env.PAYPAL_MODE,
       clientIdLast4: env.PAYPAL_CLIENT_ID.slice(-4),
       merchantAccount: "not_returned_by_client_credentials_api",
@@ -843,18 +884,18 @@ export async function syncPaypalInvoices(userId: string) {
     search = await getAllPaypalInvoicePages();
   } catch (error) {
     throw invoiceError(error, {
-      payLeakUserId: ownerId,
+      integrationScope: "shared",
       environment: env.PAYPAL_MODE,
       paypalApplicationId: oauth.appId,
       clientIdLast4: oauth.clientIdLast4,
       applicationOAuth: "verified",
       merchantAccount: "not_returned_by_client_credentials_api",
-      invoiceReadPermission: "verified_by_api_request",
+      invoiceReadPermission: "not_verified",
       invoiceReadScopeClaim: oauth.invoiceReadScope,
       invoiceWriteScopeClaim: oauth.invoiceWriteScope,
       invoicesInserted: 0,
       invoicesUpdated: 0,
-      totalInvoicesStoredInMongoDB: await getOwnerInvoiceCount(ownerId),
+      totalInvoicesStoredInMongoDB: await getSharedInvoiceCount(integration.dataScopeId),
     });
   }
   const { invoices: imported, pages, paypalTotalItems, paypalTotalPages, duplicateInvoicesSkipped } = search;
@@ -871,14 +912,20 @@ export async function syncPaypalInvoices(userId: string) {
       imported[index] = mergePaypalInvoice(invoice, details);
       invoiceDetailsRetrieved += 1;
     } catch (error) {
+      const apiError = extractError(error);
+      if (apiError.httpStatus === 403) {
+        await updateSharedPaypalIntegration(userId, {
+          $set: { "capabilities.invoicing": false },
+        });
+      }
       throw invoiceError(error, {
-        payLeakUserId: ownerId,
+        integrationScope: "shared",
         environment: env.PAYPAL_MODE,
         paypalApplicationId: oauth.appId,
         clientIdLast4: oauth.clientIdLast4,
         applicationOAuth: "verified",
         merchantAccount: "not_returned_by_client_credentials_api",
-        invoiceReadPermission: oauth.invoiceReadScope,
+        invoiceReadPermission: "not_verified",
         paypalTotalItems,
         paypalTotalPages,
         invoicesRetrieved: imported.length,
@@ -886,7 +933,7 @@ export async function syncPaypalInvoices(userId: string) {
         invoicesInserted: 0,
         invoicesUpdated: 0,
         duplicateInvoicesSkipped,
-        totalInvoicesStoredInMongoDB: await getOwnerInvoiceCount(ownerId),
+        totalInvoicesStoredInMongoDB: await getSharedInvoiceCount(integration.dataScopeId),
         invoiceId: invoice.id,
         paypalHttpStatus: httpStatus,
         pages,
@@ -905,7 +952,7 @@ export async function syncPaypalInvoices(userId: string) {
       continue;
     }
     const result = await Invoice.updateOne(
-      { userId: owner._id, paypalInvoiceId: mapped.paypalInvoiceId },
+      { userId: integration.dataScopeId, paypalInvoiceId: mapped.paypalInvoiceId },
       { $set: { ...mapped, paypalLastSyncedAt: new Date() } },
       { upsert: true, runValidators: true },
     );
@@ -913,17 +960,25 @@ export async function syncPaypalInvoices(userId: string) {
     invoicesUpdated += result.matchedCount;
   }
   const [totalInvoicesStoredInMongoDB, paypalInvoicesStored] = await Promise.all([
-    getOwnerInvoiceCount(ownerId),
-    Invoice.countDocuments({ userId: owner._id, source: "paypal" }),
+    getSharedInvoiceCount(integration.dataScopeId),
+    Invoice.countDocuments({ userId: integration.dataScopeId, source: "paypal" }),
   ]);
+  await updateSharedPaypalIntegration(userId, {
+    $set: {
+      lastInvoiceSyncedAt: new Date(),
+      "capabilities.invoicing": true,
+    },
+  });
   return {
-    payLeakUserId: ownerId,
+    integrationScope: "shared",
     environment: env.PAYPAL_MODE,
     paypalApplicationId: oauth.appId,
     clientIdLast4: oauth.clientIdLast4,
     applicationOAuth: "verified",
     merchantAccount: "not_returned_by_client_credentials_api",
-    invoiceReadPermission: oauth.invoiceReadScope,
+    invoiceReadPermission: "verified_by_api_request",
+    invoiceReadScopeClaim: oauth.invoiceReadScope,
+    invoiceWriteScopeClaim: oauth.invoiceWriteScope,
     paypalHttpStatus: pages[0]?.httpStatus ?? null,
     paypalTotalItems,
     paypalTotalPages,

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ArrowRight, BarChart3, Check, ShieldCheck, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -8,7 +8,6 @@ export default function Register() {
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
-  const navigate = useNavigate();
 
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
@@ -21,8 +20,6 @@ export default function Register() {
     setLoading(true);
     try {
       await register({ name: form.name, email: form.email, password: form.password });
-      toast.success("Your PayLeak account is ready.");
-      navigate("/", { replace: true });
     } catch (error) {
       toast.error(error.response?.data?.error?.message || "Could not create your account. Please try again.");
     } finally {

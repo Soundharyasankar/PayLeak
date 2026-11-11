@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import { Invoice } from "../models/Invoice.ts";
 import { Transaction } from "../models/Transaction.js";
 import { formatCurrencyAmount } from "../utils/money.js";
+import { sharedPaypalDataFilter, sharedPaypalInvoiceFilter } from "./paypalIntegrationService.js";
 
 interface CurrencyTotals {
   currency: string;
@@ -25,8 +26,9 @@ function totalsForCurrency(map: Map<string, CurrencyTotals>, currency: string) {
 }
 
 export async function dashboardAnalytics(userId: string) {
-  const ownerId = new Types.ObjectId(userId);
-  const records = await Transaction.find({ userId: ownerId }).select("grossAmount grossCurrency feeAmount feeCurrency feeSource finalAmount finalCurrency conversion").lean();
+  const transactionFilter = await sharedPaypalDataFilter(userId);
+  const invoiceFilter = await sharedPaypalInvoiceFilter(userId);
+  const records = await Transaction.find(transactionFilter).select("grossAmount grossCurrency feeAmount feeCurrency feeSource finalAmount finalCurrency conversion").lean();
   const currencies = new Map<string, CurrencyTotals>();
   const feeCurrencies = new Map<string, Decimal>();
   let conversionUnknownCount = 0;
@@ -60,8 +62,8 @@ export async function dashboardAnalytics(userId: string) {
   }
 
   const [invoices, monthly] = await Promise.all([
-    Invoice.find({ userId: ownerId }).select("status amount currency").lean(),
-    monthlyIncome(ownerId),
+    Invoice.find(invoiceFilter).select("status amount currency").lean(),
+    monthlyIncome(transactionFilter),
   ]);
   const currencyData = [...currencies.values()].map((item) => ({
     currency: item.currency,
@@ -93,9 +95,9 @@ export async function dashboardAnalytics(userId: string) {
   };
 }
 
-async function monthlyIncome(userId: Types.ObjectId) {
+async function monthlyIncome(filter: Record<string, unknown>) {
   const rows = await Transaction.aggregate<{ _id: { year: number; month: number; currency: string }; amount: string; count: number }>([
-    { $match: { userId } },
+    { $match: filter },
     { $group: {
       _id: {
         year: { $year: "$transactionDate" },
@@ -118,7 +120,7 @@ async function monthlyIncome(userId: Types.ObjectId) {
 }
 
 export async function leakAnalytics(userId: string) {
-  const records = await Transaction.find({ userId }).select("paypalTransactionId feeAmount feeCurrency feeSource conversion transactionDate transactionType status").sort({ transactionDate: -1 }).limit(500).lean();
+  const records = await Transaction.find(await sharedPaypalDataFilter(userId)).select("paypalTransactionId feeAmount feeCurrency feeSource conversion transactionDate transactionType status").sort({ transactionDate: -1 }).limit(500).lean();
   const fees = new Map<string, Decimal>();
   for (const transaction of records) {
     if (transaction.feeSource !== "actual_paypal" || transaction.feeAmount == null || !transaction.feeCurrency) continue;
@@ -145,7 +147,7 @@ export async function leakAnalytics(userId: string) {
 }
 
 export async function monthlyAnalytics(userId: string) {
-  return monthlyIncome(new Types.ObjectId(userId));
+  return monthlyIncome(await sharedPaypalDataFilter(userId));
 }
 
 export async function clientAnalytics(userId: string) {
@@ -163,7 +165,7 @@ export async function clientAnalytics(userId: string) {
 
 export async function currencyAnalytics(userId: string) {
   const data = await Transaction.aggregate([
-    { $match: { userId: new Types.ObjectId(userId) } },
+    { $match: await sharedPaypalDataFilter(userId) },
     { $group: { _id: "$grossCurrency", transactionCount: { $sum: 1 }, grossAmount: { $sum: { $convert: { input: "$grossAmount", to: "decimal", onError: "0", onNull: "0" } } } } },
     { $sort: { _id: 1 } },
   ]);

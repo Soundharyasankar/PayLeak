@@ -109,9 +109,24 @@ test("health and protected route responses use the documented API envelope", asy
   assert.equal(protectedPaypalConfig.status, 401);
   assert.equal((await protectedPaypalConfig.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
 
+  const protectedPaypalAccount = await fetch(`${baseUrl}/api/paypal/account`);
+  assert.equal(protectedPaypalAccount.status, 401);
+  assert.equal((await protectedPaypalAccount.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
+
   const protectedPaypalDiagnostics = await fetch(`${baseUrl}/api/paypal/diagnostics`, { method: "POST" });
   assert.equal(protectedPaypalDiagnostics.status, 401);
   assert.equal((await protectedPaypalDiagnostics.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
+
+  const protectedPaypalSync = await fetch(`${baseUrl}/api/paypal/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      startDate: "2026-11-01T00:00:00.000Z",
+      endDate: "2026-11-11T00:00:00.000Z",
+    }),
+  });
+  assert.equal(protectedPaypalSync.status, 401);
+  assert.equal((await protectedPaypalSync.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
 
   const protectedInvoiceSync = await fetch(`${baseUrl}/api/invoices/sync-paypal`, { method: "POST" });
   assert.equal(protectedInvoiceSync.status, 401);

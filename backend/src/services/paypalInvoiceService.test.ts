@@ -210,21 +210,20 @@ test("rejects an unitemized invoice without a usable project or service descript
 });
 
 test("retries a saved legacy draft with empty line items using a persisted priced PayPal item", async (context) => {
-  const [{ User }, { Invoice }, { env }, { clearPaypalTokenCache }, { publishLocalInvoiceToPaypal }] = await Promise.all([
-    import("../models/User.ts"),
+  const [{ Types }, { PayPalIntegration }, { Invoice }, { clearPaypalTokenCache }, { publishLocalInvoiceToPaypal }] = await Promise.all([
+    import("mongoose"),
+    import("../models/PayPalIntegration.ts"),
     import("../models/Invoice.ts"),
-    import("../config/env.js"),
     import("./paypalClient.js"),
     import("./paypalInvoiceService.js"),
   ]);
-  const ownerId = "507f1f77bcf86cd799439012";
+  const sharedScopeId = "507f1f77bcf86cd799439012";
+  const requestingUserId = "507f1f77bcf86cd799439013";
   const draftId = "507f1f77bcf86cd799439011";
-  const previousOwnerId = env.PAYPAL_ACCOUNT_OWNER_USER_ID;
-  env.PAYPAL_ACCOUNT_OWNER_USER_ID = ownerId;
-  context.after(() => { env.PAYPAL_ACCOUNT_OWNER_USER_ID = previousOwnerId; });
 
   const draft = {
     _id: draftId,
+    userId: new Types.ObjectId(requestingUserId),
     clientId: null,
     client: "Anitha",
     email: "client-us415@business.example.com",
@@ -244,7 +243,10 @@ test("retries a saved legacy draft with empty line items using a persisted price
   };
   let savedInvoice: Record<string, unknown> | undefined;
   let submittedItems: Array<Record<string, unknown>> = [];
-  context.mock.method(User, "findById", (() => ({ select: async () => ({ _id: ownerId }) })) as Function);
+  context.mock.method(PayPalIntegration, "findOne", (() => Promise.resolve({
+    _id: "paypal-sandbox",
+    dataScopeId: new Types.ObjectId(sharedScopeId),
+  })) as Function);
   context.mock.method(Invoice, "findOne", (() => draft) as Function);
   context.mock.method(Invoice, "findOneAndUpdate", ((_filter: unknown, update: { $set: Record<string, unknown> }) => {
     savedInvoice = { ...update.$set, _id: draftId };
@@ -295,7 +297,7 @@ test("retries a saved legacy draft with empty line items using a persisted price
   try {
     clearPaypalTokenCache();
     const invoice = await publishLocalInvoiceToPaypal(
-      ownerId,
+      requestingUserId,
       draftId,
       "ab2e1533-8526-4d7a-8e54-37d4800ec987",
     );
@@ -312,6 +314,56 @@ test("retries a saved legacy draft with empty line items using a persisted price
   } finally {
     clearPaypalTokenCache();
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("reports a real PayPal HTTP 403 as denied Invoicing API access", async (context) => {
+  const [{ Types }, { PayPalIntegration }, { Invoice }, { clearPaypalTokenCache }, { diagnosePaypalInvoiceAccess }] = await Promise.all([
+    import("mongoose"),
+    import("../models/PayPalIntegration.ts"),
+    import("../models/Invoice.ts"),
+    import("./paypalClient.js"),
+    import("./paypalInvoiceService.js"),
+  ]);
+  context.mock.method(PayPalIntegration, "findOne", (() => Promise.resolve({
+    _id: "paypal-sandbox",
+    dataScopeId: new Types.ObjectId("507f1f77bcf86cd799439012"),
+  })) as Function);
+  context.mock.method(PayPalIntegration, "updateOne", (async () => ({ matchedCount: 1 })) as Function);
+  context.mock.method(Invoice, "exists", (async () => null) as Function);
+  context.mock.method(Invoice, "countDocuments", (async () => 0) as Function);
+
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/v1/oauth2/token")) {
+      return new Response(JSON.stringify({
+        access_token: "temporary-test-token",
+        expires_in: 3600,
+        scope: "https://uri.paypal.com/services/invoicing/invoices/read https://uri.paypal.com/services/invoicing/invoices/write",
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      name: "AUTHORIZATION_ERROR",
+      message: "The app cannot access Invoicing.",
+      debug_id: "PAYPAL-403-TEST",
+    }), { status: 403, headers: { "Content-Type": "application/json" } });
+  };
+  console.error = () => undefined;
+
+  try {
+    clearPaypalTokenCache();
+    const result = await diagnosePaypalInvoiceAccess("507f1f77bcf86cd799439013");
+    assert.equal(result.invoiceApiAccess, "permission_denied");
+    assert.equal(result.invoiceReadPermission, "permission_denied");
+    assert.equal(result.paypalHttpStatus, 403);
+    assert.equal(result.paypalApiError?.debugId, "PAYPAL-403-TEST");
+    assert.notEqual(result.invoiceApiAccess, "authorized");
+  } finally {
+    clearPaypalTokenCache();
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
   }
 });
 

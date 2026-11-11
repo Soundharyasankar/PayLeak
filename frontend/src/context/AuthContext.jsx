@@ -1,22 +1,27 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, endpoints, responseData } from "../services/api.js";
+import { claimPaypalWelcome } from "../utils/paypalWelcome.js";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [paypal, setPaypal] = useState(null);
+  const [paypalWelcomePending, setPaypalWelcomePending] = useState(false);
   const [status, setStatus] = useState("loading");
   const [paypalError, setPaypalError] = useState("");
 
   const refreshPaypalAccount = useCallback(async () => {
     try {
       const response = await api.get(endpoints.paypalAccount);
-      setPaypal(responseData(response));
+      const account = responseData(response);
+      setPaypal(account);
       setPaypalError("");
+      return account;
     } catch (error) {
       setPaypal(null);
       setPaypalError(error.response?.data?.error?.message || "Could not load PayPal account status.");
+      return null;
     }
   }, []);
 
@@ -52,18 +57,22 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (credentials) => {
     const response = await api.post(endpoints.login, credentials);
     const data = responseData(response);
+    const account = await refreshPaypalAccount();
+    setPaypalWelcomePending(claimPaypalWelcome(data.user, Boolean(account?.connected)));
     setUser(data.user);
     setStatus("authenticated");
     return data.user;
-  }, []);
+  }, [refreshPaypalAccount]);
 
   const register = useCallback(async (details) => {
     const response = await api.post(endpoints.register, details);
     const data = responseData(response);
+    const account = await refreshPaypalAccount();
+    setPaypalWelcomePending(claimPaypalWelcome(data.user, Boolean(account?.connected)));
     setUser(data.user);
     setStatus("authenticated");
     return data.user;
-  }, []);
+  }, [refreshPaypalAccount]);
 
   const updateProfile = useCallback(async (profile) => {
     const response = await api.put(endpoints.currentUser, profile);
@@ -78,14 +87,18 @@ export function AuthProvider({ children }) {
     } finally {
       setUser(null);
       setPaypal(null);
+      setPaypalWelcomePending(false);
       setPaypalError("");
       setStatus("anonymous");
     }
   }, []);
 
+  const finishPaypalWelcome = useCallback(() => setPaypalWelcomePending(false), []);
+
   const value = useMemo(() => ({
     user,
     paypal,
+    paypalWelcomePending,
     paypalError,
     status,
     isAuthenticated: status === "authenticated" && Boolean(user),
@@ -95,7 +108,8 @@ export function AuthProvider({ children }) {
     logout,
     updateProfile,
     refreshPaypalAccount,
-  }), [user, paypal, paypalError, status, login, register, logout, updateProfile, refreshPaypalAccount]);
+    finishPaypalWelcome,
+  }), [user, paypal, paypalWelcomePending, paypalError, status, login, register, logout, updateProfile, refreshPaypalAccount, finishPaypalWelcome]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

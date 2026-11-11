@@ -181,6 +181,20 @@ export async function paypalRequest<T>(
             ? "PayPal is temporarily unavailable. Please try again later."
           : `PayPal API request failed with status ${response.status}.`,
         response.status === 403 ? "PAYPAL_PERMISSION_DENIED" : "PAYPAL_API_ERROR",
+        undefined,
+        response.status === 403
+          ? {
+              httpStatus: response.status,
+              paypalErrorName,
+              paypalMessage: typeof payload.message === "string" ? payload.message : null,
+              debugId,
+            }
+          : {
+              httpStatus: response.status,
+              paypalErrorName,
+              paypalMessage: typeof payload.message === "string" ? payload.message : null,
+              debugId,
+            },
       );
     }
     if (response.status === 204) return undefined as T;

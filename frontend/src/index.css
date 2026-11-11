@@ -217,6 +217,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .login-mobile-brand { display: none; }
 .onboarding-screen { min-height: 100vh; padding: 28px 5vw 40px; background: radial-gradient(ellipse at 50% 35%, #f3f0ff 0, transparent 44%), #f8f9fc; }
 .onboarding-top { display: flex; max-width: 1160px; align-items: center; justify-content: space-between; margin: 0 auto; }
+.paypal-back-link { flex: 0 0 auto; gap: 7px; white-space: nowrap; }
+.inline-success { margin: 10px 0; padding: 10px 12px; border: 1px solid #ccebdd; border-radius: 8px; color: #167753; background: #f0fbf6; font-size: 10px; text-align: left; }
 .onboarding-progress { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 46px auto 23px; }
 .onboarding-progress > span { display: grid; width: 25px; height: 25px; place-items: center; border: 1px solid #e4e5ed; border-radius: 50%; color: #969baa; background: white; font-size: 10px; }
 .onboarding-progress > span.done { border-color: #7659ef; color: white; background: #7659ef; }
@@ -248,6 +250,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .connect-privacy svg { color: #24a37b; }
 .onboarding-help { margin: 18px auto 0; color: #9297a5; font-size: 10px; text-align: center; }
 .onboarding-help .text-button { font-size: 10px; }
+.paypal-success-screen { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: radial-gradient(ellipse at 50% 38%, #e8f8ef 0, transparent 46%), #f8faf9; }
+.paypal-success-card { width: min(460px, 100%); padding: 44px 38px; border: 1px solid #dcefe4; border-radius: 18px; background: #fff; box-shadow: 0 20px 60px #22583a12; text-align: center; animation: paypal-success-enter .35s ease-out both; }
+.paypal-success-icon { margin-bottom: 20px; color: #20a36a; }
+.paypal-success-card .eyebrow { color: #32946b; }
+.paypal-success-card h1 { margin: 12px 0 9px; color: #233b30; font-family: Manrope, sans-serif; font-size: clamp(22px, 4vw, 29px); letter-spacing: -.8px; }
+.paypal-success-card p { margin: 0 auto 18px; color: #68796f; font-size: 13px; line-height: 1.65; }
+.paypal-success-card small { color: #849188; font-size: 10px; }
+.paypal-dashboard-status { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #e6e9ef; border-radius: 7px; color: #737988; background: #fff; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.paypal-dashboard-status i { width: 7px; height: 7px; border-radius: 50%; background: #aeb3be; }
+.paypal-dashboard-status.connected { border-color: #ccebdc; color: #18764f; background: #f1fbf6; }
+.paypal-dashboard-status.connected i { background: #24a875; box-shadow: 0 0 0 3px #24a8751c; }
+.dashboard-header-actions { display: flex; align-items: center; gap: 9px; }
+@keyframes paypal-success-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .spinner { width: 15px; height: 15px; border: 2px solid #ffffff66; border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -695,6 +710,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .page-heading p { max-width: 320px; font-size: 10px; line-height: 1.5; }
   .page-heading-action { align-self: center; }
   .page-heading-action .button { min-height: 34px; gap: 5px; padding: 0 8px; font-size: 9px; white-space: nowrap; }
+  .dashboard-header-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .dashboard-header-actions .paypal-dashboard-status { flex: 1 0 100%; justify-content: center; }
   .stats-grid.four { grid-template-columns: 1fr 1fr; gap: 8px; }
   .stat-card { padding: 11px; }
   .stat-top { align-items: flex-start; gap: 4px; font-size: 9px; }
@@ -719,6 +736,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .login-card { margin: 0 auto; padding: 22px 19px; border: 1px solid #eff0f4; border-radius: 13px; background: white; box-shadow: var(--shadow); }
   .login-card h2 { font-size: 22px; }
   .onboarding-screen { padding: 19px 14px 30px; }
+  .onboarding-top { gap: 8px; }
+  .paypal-back-link { min-height: 34px; padding: 0 8px; font-size: 9px; }
   .onboarding-progress { margin: 32px auto 17px; }
   .connect-card { padding: 27px 19px 23px; }
   .connect-card h1 { font-size: 21px; }

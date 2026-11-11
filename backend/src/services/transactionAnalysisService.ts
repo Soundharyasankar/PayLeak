@@ -5,6 +5,7 @@ import { Transaction } from "../models/Transaction.js";
 import { AppError } from "../utils/errors.js";
 import { formatCurrencyAmount } from "../utils/money.js";
 import { generateTransactionExplanation } from "./aiService.js";
+import { sharedPaypalDataFilter } from "./paypalIntegrationService.js";
 import {
   calculatePaypalTransactionValues,
   comparePaypalMoney,
@@ -345,10 +346,15 @@ export function buildTransactionFinancialAnalysis(transaction: TransactionForAna
 }
 
 export async function analyzeOwnedTransaction(userId: string, transactionId: string, regenerate = false) {
-  const transaction = await Transaction.findOne({ userId, paypalTransactionId: transactionId }).lean();
+  const transaction = await Transaction.findOne({
+    $and: [
+      await sharedPaypalDataFilter(userId),
+      { paypalTransactionId: transactionId },
+    ],
+  }).lean();
   if (!transaction) throw new AppError(404, "Transaction not found.", "TRANSACTION_NOT_FOUND");
   const separateConversion = await CurrencyConversion.findOne({
-    userId,
+    userId: transaction.userId,
     transactionId: transaction._id,
     sourceStatus: "actual_paypal",
   }).sort({ retrievedAt: -1 }).lean();
@@ -429,7 +435,7 @@ export async function analyzeOwnedTransaction(userId: string, transactionId: str
   } else {
     ai = await generateTransactionExplanation(currentFacts, regenerate);
     await Transaction.updateOne(
-      { _id: transaction._id, userId },
+      { _id: transaction._id, userId: transaction.userId },
       {
         $set: {
           aiAnalysis: {
@@ -445,7 +451,7 @@ export async function analyzeOwnedTransaction(userId: string, transactionId: str
   const result = makeAnalysis(transactionForAnalysis, ai);
   const net = calculated.calculatedNet;
   await Transaction.updateOne(
-    { _id: transaction._id, userId },
+    { _id: transaction._id, userId: transaction.userId },
     {
       $set: {
         payleakCalculatedNetAmount: net?.value ?? null,

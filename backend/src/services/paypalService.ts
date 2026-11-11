@@ -1,10 +1,10 @@
 import { env } from "../config/env.js";
-import { PayPalAccount } from "../models/PayPalAccount.js";
+import { PayPalIntegration } from "../models/PayPalIntegration.ts";
 import { Transaction } from "../models/Transaction.js";
-import { User } from "../models/User.ts";
 import { AppError } from "../utils/errors.js";
 import { paypalRequest, verifyPaypalApplicationOAuth } from "./paypalClient.js";
 import { calculatePaypalTransactionValues, explainNetMismatch } from "./analytics/paypalCalculationService.js";
+import { getSharedPaypalIntegration, updateSharedPaypalIntegration } from "./paypalIntegrationService.js";
 
 interface PaypalSearchItem {
   transaction_info?: {
@@ -41,73 +41,39 @@ function escapeQuery(value: string) {
   return encodeURIComponent(value);
 }
 
-export async function assertConfiguredOwner(userId: string) {
-  if (!env.PAYPAL_ACCOUNT_OWNER_USER_ID) {
-    throw new AppError(503, "PayPal application credentials do not authorize a PayLeak user by themselves. Configure the single-merchant PayLeak owner using PAYPAL_ACCOUNT_OWNER_USER_ID after verifying who controls the PayPal business account. Separate sellers require PayPal partner approval and seller consent.", "PAYPAL_OWNER_BINDING_REQUIRED");
-  }
-  const owner = await User.findById(env.PAYPAL_ACCOUNT_OWNER_USER_ID).select("_id");
-  if (!owner) {
-    throw new AppError(503, "The configured PayLeak merchant owner no longer exists. Update PAYPAL_ACCOUNT_OWNER_USER_ID after verifying the designated account.", "PAYPAL_OWNER_BINDING_INVALID");
-  }
-  if (String(owner._id) !== userId) {
-    throw new AppError(403, "PayPal transaction data is restricted to the configured PayLeak merchant-owner account.", "PAYPAL_ACCOUNT_FORBIDDEN");
-  }
-  return owner;
-}
-
 export async function getPaypalAccount(userId: string) {
-  const account = await PayPalAccount.findOne({ userId }).lean();
-  const ownerId = env.PAYPAL_ACCOUNT_OWNER_USER_ID;
-  const owner = ownerId ? await User.findById(ownerId).select("_id") : null;
-  const ownerBinding = !ownerId
-    ? "not_configured"
-    : !owner ? "configured_user_missing"
-      : String(owner._id) === userId ? "verified"
-        : "configured_for_another_user";
+  const integration = await getSharedPaypalIntegration(userId);
   const environment = env.PAYPAL_MODE;
-  if (!account) {
-    return {
-      connected: false,
-      connectionType: "not_connected",
-      email: null,
-      environment,
-      applicationCredentialsConfigured: Boolean(env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET),
-      ownerBinding,
-      merchantConsent: "not_required_for_single_merchant",
-      canSync: false,
-      capabilities: {
+  const applicationCredentialsConfigured = Boolean(env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET);
+  const capabilities = (integration.environment === environment
+    ? integration.capabilities ?? {
         transactionSearch: false,
         invoicing: false,
         exchangeRateQuotes: false,
-      },
-      lastSyncedAt: null,
-    };
-  }
-  const transactionSearchAvailable = account.capabilities?.transactionSearch ?? false;
+      }
+    : {
+        transactionSearch: false,
+        invoicing: false,
+        exchangeRateQuotes: false,
+      });
   return {
-    connected: false,
-    connectionType: transactionSearchAvailable ? "single_merchant_rest_app" : "not_connected",
-    email: null,
+    connected: applicationCredentialsConfigured && Boolean(capabilities.transactionSearch || capabilities.invoicing),
+    connectionType: "shared_application_credentials",
+    scope: "shared",
+    email: integration.accountEmailVerified ? integration.accountEmail : null,
     environment,
-    applicationCredentialsConfigured: Boolean(env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET),
-    ownerBinding,
-    merchantConsent: "not_required_for_single_merchant",
-    canSync: ownerBinding === "verified" && transactionSearchAvailable && account.environment === environment,
-    capabilities: account.capabilities,
-    lastSyncedAt: account.lastSyncedAt,
+    applicationCredentialsConfigured,
+    canSync: applicationCredentialsConfigured && Boolean(capabilities.transactionSearch),
+    capabilities,
+    lastSyncedAt: integration.lastSyncedAt,
+    lastInvoiceSyncedAt: integration.lastInvoiceSyncedAt,
   };
 }
 
 export async function diagnosePaypalAccess(userId: string) {
-  const configuredOwnerId = env.PAYPAL_ACCOUNT_OWNER_USER_ID;
-  const configuredOwner = configuredOwnerId ? await User.findById(configuredOwnerId).select("_id") : null;
-  const ownerBinding = !configuredOwnerId
-    ? "not_configured"
-    : !configuredOwner ? "configured_user_missing"
-      : String(configuredOwner._id) === userId ? "verified"
-        : "configured_for_another_user";
+  const integration = await getSharedPaypalIntegration(userId);
   const result = {
-    payLeakUserId: userId,
+    integrationScope: "shared",
     environment: env.PAYPAL_MODE,
     paypalOAuthAppId: null as string | null,
     clientIdLast4: env.PAYPAL_CLIENT_ID ? env.PAYPAL_CLIENT_ID.slice(-4) : null,
@@ -116,8 +82,6 @@ export async function diagnosePaypalAccess(userId: string) {
     transactionSearchScope: "not_tested",
     transactionSearchApi: "not_tested",
     transactionSearchHttpStatus: null as number | null,
-    ownerBinding,
-    merchantConsent: "not_required_for_single_merchant",
     canSync: false,
     guidance: "",
     paypalApiError: null as null | {
@@ -160,17 +124,30 @@ export async function diagnosePaypalAccess(userId: string) {
       (status) => { result.transactionSearchHttpStatus = status; },
     );
     result.transactionSearchApi = "authorized";
+    await PayPalIntegration.updateOne(
+      { _id: integration._id },
+      { $set: { "capabilities.transactionSearch": true } },
+    );
   } catch (error) {
     result.transactionSearchApi = error instanceof AppError && error.code === "PAYPAL_PERMISSION_DENIED"
       ? "permission_denied"
       : "unavailable";
-    if (error instanceof AppError && error.details && typeof error.details === "object") {
-      const details = error.details as Record<string, unknown>;
+    if (result.transactionSearchApi === "permission_denied") {
+      await PayPalIntegration.updateOne(
+        { _id: integration._id },
+        { $set: { "capabilities.transactionSearch": false } },
+      );
+    }
+    const diagnostic = error instanceof AppError
+      ? (error.diagnostic && typeof error.diagnostic === "object" ? error.diagnostic as Record<string, unknown> : (
+        error.details && typeof error.details === "object" ? error.details as Record<string, unknown> : {}))
+      : {};
+    if (error instanceof AppError && Object.keys(diagnostic).length > 0) {
       result.paypalApiError = {
-        httpStatus: typeof details.httpStatus === "number" ? details.httpStatus : null,
-        name: typeof details.paypalErrorName === "string" ? details.paypalErrorName : null,
-        message: typeof details.paypalMessage === "string" ? details.paypalMessage : null,
-        debugId: typeof details.debugId === "string" ? details.debugId : null,
+        httpStatus: typeof diagnostic.httpStatus === "number" ? diagnostic.httpStatus : null,
+        name: typeof diagnostic.paypalErrorName === "string" ? diagnostic.paypalErrorName : null,
+        message: typeof diagnostic.paypalMessage === "string" ? diagnostic.paypalMessage : null,
+        debugId: typeof diagnostic.debugId === "string" ? diagnostic.debugId : null,
       };
     }
     result.guidance = error instanceof AppError
@@ -178,28 +155,18 @@ export async function diagnosePaypalAccess(userId: string) {
       : "PayPal Transaction Search permission could not be verified.";
   }
 
-  result.canSync = result.ownerBinding === "verified"
-    && result.applicationOAuth === "verified"
-    && result.transactionSearchScope === "present"
+  result.canSync = result.applicationOAuth === "verified"
     && result.transactionSearchApi === "authorized";
-  if (!result.guidance && result.ownerBinding === "not_configured") {
-    result.guidance = "The PayPal app authenticated, but no immutable PayLeak owner account is configured. Verify which PayLeak user controls this merchant account before setting PAYPAL_ACCOUNT_OWNER_USER_ID.";
-  } else if (!result.guidance && result.ownerBinding === "configured_user_missing") {
-    result.guidance = "PAYPAL_ACCOUNT_OWNER_USER_ID does not match an existing MongoDB user.";
-  } else if (!result.guidance && result.ownerBinding === "configured_for_another_user") {
-    result.guidance = "The configured PayPal owner is a different PayLeak user. Sign in as that owner to sync.";
-  }
-  if (!result.guidance && result.transactionSearchScope === "missing") {
-    result.guidance = "The fresh OAuth token does not include the required Transaction Search reporting scope. The enabled Dashboard checkbox has not resulted in this REST app token receiving that scope.";
-  } else if (!result.guidance && result.transactionSearchScope === "not_reported") {
-    result.guidance = "PayPal authenticated the app but did not return OAuth scopes; the Transaction Search API check is still required.";
-  } else if (!result.guidance && result.transactionSearchApi === "permission_denied") {
+  if (!result.guidance && result.transactionSearchApi === "permission_denied") {
     result.guidance = "The API returned HTTP 403 despite the OAuth check. Use PayPal's error and debug ID with PayPal Developer Support to verify app type, merchant ownership, and Sandbox account capability.";
   } else if (!result.guidance && result.transactionSearchApi !== "authorized") {
     result.guidance = "The Transaction Search API request did not succeed.";
-  }
-  if (!result.guidance && result.canSync) {
-    result.guidance = "PayPal OAuth and Transaction Search are available for the configured single-merchant app.";
+  } else if (!result.guidance && result.transactionSearchScope === "missing") {
+    result.guidance = "PayPal authorized Transaction Search even though the OAuth response omitted its reporting scope claim. The actual API request succeeded.";
+  } else if (!result.guidance && result.transactionSearchScope === "not_reported") {
+    result.guidance = "PayPal authorized Transaction Search. The OAuth response did not report scopes.";
+  } else if (!result.guidance && result.canSync) {
+    result.guidance = "The shared PayPal integration is authenticated and Transaction Search is available.";
   }
   return result;
 }
@@ -319,13 +286,14 @@ export async function getTransactionSearchData(startDate: Date, endDate: Date) {
 }
 
 export async function syncPaypalTransactions(userId: string, startDate: Date, endDate: Date) {
-  const owner = await assertConfiguredOwner(userId);
+  const integration = await getSharedPaypalIntegration(userId);
+  const dataScopeId = integration.dataScopeId;
   let oauth: Awaited<ReturnType<typeof verifyPaypalApplicationOAuth>>;
   try {
     oauth = await verifyPaypalApplicationOAuth();
   } catch (error) {
     throw addSyncFailureContext(error, {
-      payLeakUserId: String(owner._id),
+      integrationScope: "shared",
       clientIdLast4: env.PAYPAL_CLIENT_ID.slice(-4),
       environment: env.PAYPAL_MODE,
       requestedDateRange: { startDate: startDate.toISOString(), endDate: endDate.toISOString() },
@@ -336,7 +304,7 @@ export async function syncPaypalTransactions(userId: string, startDate: Date, en
     search = await getTransactionSearchData(startDate, endDate);
   } catch (error) {
     throw addSyncFailureContext(error, {
-      payLeakUserId: String(owner._id),
+      integrationScope: "shared",
       paypalOAuthAppId: oauth.appId,
       clientIdLast4: env.PAYPAL_CLIENT_ID.slice(-4),
       environment: env.PAYPAL_MODE,
@@ -436,8 +404,8 @@ export async function syncPaypalTransactions(userId: string, startDate: Date, en
   let existingRecordsUpdated = 0;
   for (const transaction of transactions) {
     const result = await Transaction.updateOne(
-      { userId: owner._id, paypalTransactionId: transaction.paypalTransactionId },
-      { $set: { ...transaction, userId: owner._id } },
+      { userId: dataScopeId, paypalTransactionId: transaction.paypalTransactionId },
+      { $set: { ...transaction, userId: dataScopeId } },
       { upsert: true, runValidators: true },
     );
     totalRecordsInserted += result.upsertedCount;
@@ -445,11 +413,11 @@ export async function syncPaypalTransactions(userId: string, startDate: Date, en
   }
   const requestedRange = { $gte: startDate, $lte: endDate };
   const [totalRecordsStored, totalRecordsStoredInRange] = await Promise.all([
-    Transaction.countDocuments({ userId: owner._id }),
-    Transaction.countDocuments({ userId: owner._id, transactionDate: requestedRange }),
+    Transaction.countDocuments({ userId: dataScopeId }),
+    Transaction.countDocuments({ userId: dataScopeId, transactionDate: requestedRange }),
   ]);
   const diagnostics = {
-    payLeakUserId: String(owner._id),
+    integrationScope: "shared",
     paypalOAuthAppId: oauth.appId,
     clientIdLast4: env.PAYPAL_CLIENT_ID.slice(-4),
     paypalMerchantAccountIdentity: "not_returned_by_client_credentials_transaction_search",
@@ -467,22 +435,13 @@ export async function syncPaypalTransactions(userId: string, startDate: Date, en
     totalRecordsStoredInMongoDBForRange: totalRecordsStoredInRange,
   };
   console.info("PayPal transaction sync", JSON.stringify(diagnostics));
-  await PayPalAccount.findOneAndUpdate(
-    { userId: owner._id },
+  await updateSharedPaypalIntegration(userId,
     {
       $set: {
         lastSyncedAt: retrievedAt,
         "capabilities.transactionSearch": true,
-        "capabilities.invoicing": false,
-        "capabilities.exchangeRateQuotes": false,
-      },
-      $setOnInsert: {
-        userId: owner._id,
-        environment: env.PAYPAL_MODE,
-        connectedAt: retrievedAt,
       },
     },
-    { upsert: true },
   );
   return {
     ...diagnostics,
@@ -495,7 +454,11 @@ export async function syncPaypalTransactions(userId: string, startDate: Date, en
 }
 
 export async function refreshPaypalTransaction(userId: string, transactionId: string) {
-  const existing = await Transaction.findOne({ userId, paypalTransactionId: transactionId }).select("transactionDate");
+  const integration = await getSharedPaypalIntegration(userId);
+  const existing = await Transaction.findOne({
+    paypalTransactionId: transactionId,
+    $or: [{ userId }, { userId: integration.dataScopeId }],
+  }).select("transactionDate");
   if (!existing) throw new AppError(404, "Transaction not found.", "TRANSACTION_NOT_FOUND");
   const startDate = new Date(existing.transactionDate.getTime() - 3 * 24 * 60 * 60 * 1000);
   const endDate = new Date(existing.transactionDate.getTime() + 3 * 24 * 60 * 60 * 1000);
@@ -503,7 +466,7 @@ export async function refreshPaypalTransaction(userId: string, transactionId: st
   if (!sync.syncedTransactionIds.includes(transactionId)) {
     throw new AppError(404, "PayPal did not return this transaction in the refresh response.", "PAYPAL_TRANSACTION_NOT_RETURNED");
   }
-  const refreshed = await Transaction.findOne({ userId, paypalTransactionId: transactionId })
+  const refreshed = await Transaction.findOne({ userId: integration.dataScopeId, paypalTransactionId: transactionId })
     .select("paypalTransactionId retrievedAt netVerificationStatus");
   if (!refreshed) throw new AppError(500, "The refreshed PayPal transaction could not be loaded.", "PAYPAL_TRANSACTION_REFRESH_FAILED");
   return {
@@ -514,6 +477,6 @@ export async function refreshPaypalTransaction(userId: string, transactionId: st
 }
 
 export async function connectConfiguredMerchant(userId: string) {
-  await assertConfiguredOwner(userId);
+  await getSharedPaypalIntegration(userId);
   throw new AppError(501, "PayPal user-consent OAuth/partner onboarding is not available in this deployment. Configure an eligible merchant/partner integration before connecting accounts.", "PAYPAL_OAUTH_UNAVAILABLE");
 }

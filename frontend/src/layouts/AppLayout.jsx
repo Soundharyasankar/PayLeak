@@ -18,7 +18,7 @@ export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const { user, logout, paypal } = useAuth();
+  const { user, logout, paypal, paypalError } = useAuth();
   const { notifications, loading, error, refresh } = useAppData();
   const navigate = useNavigate();
   const unread = notifications.filter((item) => item.unread).length;
@@ -56,7 +56,7 @@ export default function AppLayout() {
         </nav>
         <div className="sidebar-connect">
           <div className="connect-mini-icon"><WalletCards size={18} /></div>
-          <div><b>PayPal {paypal?.canSync ? "sync authorized" : paypal?.applicationCredentialsConfigured ? "app configured" : "not authorized"}</b><small>{paypal?.environment ? `${paypal.environment} · ${paypal.ownerBinding?.replaceAll("_", " ") || "owner not configured"}` : "Merchant access requires verification"}</small></div>
+          <div><b>{paypal?.connected ? `PayPal ${paypal.environment === "sandbox" ? "Sandbox " : ""}Connected` : paypal ? "PayPal not connected" : "PayPal status unavailable"}</b><small>{paypalError ? "Shared integration status unavailable" : "Shared PayPal integration"}</small></div>
           <span className={`connection-dot ${paypal?.connected ? "connected" : ""}`} />
         </div>
         <div className="sidebar-bottom">

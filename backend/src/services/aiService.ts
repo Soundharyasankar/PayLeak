@@ -5,6 +5,7 @@ import { Invoice } from "../models/Invoice.ts";
 import { Transaction } from "../models/Transaction.js";
 import { AppError } from "../utils/errors.js";
 import { z } from "zod";
+import { sharedPaypalDataFilter, sharedPaypalInvoiceFilter } from "./paypalIntegrationService.js";
 
 export type ConversationMessage = {
   role: "user" | "assistant";
@@ -57,7 +58,15 @@ export function financialContextFilters(userId: string) {
 }
 
 async function loadFinancialContext(userId: string) {
-  const filters = financialContextFilters(userId);
+  const [transactionsFilter, invoicesFilter] = await Promise.all([
+    sharedPaypalDataFilter(userId),
+    sharedPaypalInvoiceFilter(userId),
+  ]);
+  const filters = {
+    ...financialContextFilters(userId),
+    transactions: transactionsFilter,
+    invoices: invoicesFilter,
+  };
   const [transactions, invoices, conversions] = await Promise.all([
     Transaction.find(filters.transactions)
       .select("paypalTransactionId transactionType status grossAmount grossCurrency feeAmount feeCurrency feeSource conversion withdrawalAmount withdrawalCurrency withdrawalFeeAmount withdrawalFeeCurrency finalAmount finalCurrency transactionDate financialDataStatus")

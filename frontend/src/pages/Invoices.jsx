@@ -73,7 +73,7 @@ export default function Invoices() {
     try {
       const result = await diagnosePaypalInvoices();
       setSyncDiagnostics(result);
-      if (result.paypalApiError || result.invoiceApiAccess !== "verified" || result.invoiceCreatePermission !== "verified_by_successful_create" || result.ownerBinding !== "verified") {
+      if (result.invoiceApiAccess !== "authorized") {
         setRequestError(result.guidance);
         toast.error(result.guidance);
       } else {
@@ -116,9 +116,8 @@ export default function Invoices() {
         <summary>PayPal invoice synchronization diagnostics</summary>
         <dl>
           <dt>Environment</dt><dd>{syncDiagnostics.environment}</dd>
-          <dt>PayLeak user ID</dt><dd>{syncDiagnostics.payLeakUserId}</dd>
+          <dt>Integration scope</dt><dd>{syncDiagnostics.integrationScope || "shared"}</dd>
           <dt>PayPal OAuth</dt><dd>{syncDiagnostics.applicationOAuth || "not verified"}</dd>
-          <dt>PayLeak owner binding</dt><dd>{syncDiagnostics.ownerBinding || "not verified"}</dd>
           <dt>PayPal application ID</dt><dd>{syncDiagnostics.paypalApplicationId || "not reported"}</dd>
           <dt>Client ID suffix</dt><dd>{syncDiagnostics.clientIdLast4 || "not reported"}</dd>
           <dt>Merchant identity</dt><dd>{syncDiagnostics.merchantAccount || "not available from app OAuth"}</dd>

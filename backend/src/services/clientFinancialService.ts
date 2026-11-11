@@ -8,6 +8,7 @@ import { AppError } from "../utils/errors.js";
 import { formatCurrencyAmount } from "../utils/money.js";
 import { generateFinancialAgentAnswer } from "./aiService.js";
 import { listOwnedTransactionsForFinancialAnalysis } from "./transactionService.ts";
+import { sharedPaypalInvoiceFilter } from "./paypalIntegrationService.js";
 
 type MoneyTotals = Map<string, Decimal>;
 type ClientRecord = {
@@ -326,10 +327,10 @@ export async function retrieveOwnedFinancialRecords<T>(userId: string, retrieve:
 
 async function loadOwnedRecords(userId: string) {
   const ownerId = new Types.ObjectId(userId);
-  const [clients, transactions, invoices] = await retrieveOwnedFinancialRecords(userId, () => Promise.all([
+  const [clients, transactions, invoices] = await retrieveOwnedFinancialRecords(userId, async () => Promise.all([
     Client.find({ userId: ownerId }).select("_id name email company").sort({ name: 1 }).limit(501).lean(),
     listOwnedTransactionsForFinancialAnalysis(userId, 10001),
-    Invoice.find({ userId: ownerId }).select("_id clientId client email customerName customerEmail invoiceNumber amount totalAmount paymentAmount currency status invoiceDate paymentDate dueDate").sort({ invoiceDate: -1 }).limit(10001).lean(),
+    Invoice.find(await sharedPaypalInvoiceFilter(userId)).select("_id clientId client email customerName customerEmail invoiceNumber amount totalAmount paymentAmount currency status invoiceDate paymentDate dueDate source").sort({ invoiceDate: -1 }).limit(10001).lean(),
   ]));
   if (clients.length > 500 || transactions.length > 10000 || invoices.length > 10000) {
     throw new AppError(413, "This account has more financial records than the current analysis limit. Apply a narrower date period and try again.", "FINANCIAL_ANALYSIS_LIMIT");

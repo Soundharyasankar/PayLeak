@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ArrowRight, BarChart3, Check, Eye, EyeOff, ShieldCheck, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -10,15 +10,12 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
-  const navigate = useNavigate();
 
   const submit = async (event) => {
     event.preventDefault();
     setLoading(true);
     try {
       await login({ email, password });
-      toast.success("You’re signed in.");
-      navigate("/", { replace: true });
     } catch (error) {
       toast.error(error.response?.data?.error?.message || "Could not sign in. Check your connection and try again.");
     } finally {
