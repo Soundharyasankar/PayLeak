@@ -10,6 +10,7 @@ import { idParam } from "../validators/common.js";
 import { z } from "zod";
 import { rateLimit } from "express-rate-limit";
 import { diagnosePaypalInvoiceAccess, syncPaypalInvoices } from "../services/paypalInvoiceService.js";
+import { AppError } from "../utils/errors.js";
 import { paypalInvoiceCurrencies } from "../config/paypalCurrencies.js";
 import { understandInvoiceTurn } from "../services/invoiceAssistantService.js";
 
@@ -55,10 +56,24 @@ invoiceRoutes.post("/", validateBody(invoiceBody), asyncHandler(async (req, res)
   const requestId = idempotencyKey.parse(req.header("Idempotency-Key"));
   return success(res, await createInvoice(getUserId(req), req.body, requestId), 201);
 }));
-invoiceRoutes.post("/paypal/diagnostics", asyncHandler(async (req, res) =>
-  success(res, await diagnosePaypalInvoiceAccess(getUserId(req)))));
-invoiceRoutes.post("/sync-paypal", asyncHandler(async (req, res) =>
-  success(res, await syncPaypalInvoices(getUserId(req)))));
+invoiceRoutes.post("/paypal/diagnostics", asyncHandler(async (req, res) => {
+  const diagnostic = await diagnosePaypalInvoiceAccess(getUserId(req));
+  return success(res, {
+    invoiceApiAccess: diagnostic.invoiceApiAccess === "authorized" ? "authorized" : "unavailable",
+  });
+}));
+invoiceRoutes.post("/sync-paypal", asyncHandler(async (req, res) => {
+  try {
+    await syncPaypalInvoices(getUserId(req));
+    return success(res, { synchronized: true });
+  } catch (error) {
+    console.error("PayPal invoice synchronization failed", {
+      code: error instanceof AppError ? error.code : "UNEXPECTED_ERROR",
+      diagnostic: error instanceof AppError ? error.diagnostic : undefined,
+    });
+    throw new AppError(502, "Unable to synchronize PayPal invoices. Please try again.", "PAYPAL_INVOICE_SYNC_FAILED");
+  }
+}));
 invoiceRoutes.post("/:id/paypal", asyncHandler(async (req, res) => {
   const { id } = idParam.parse(req.params);
   const requestId = idempotencyKey.parse(req.header("Idempotency-Key"));

@@ -33,10 +33,21 @@ paypalRoutes.get("/connect", asyncHandler(async (_req, _res) => {
   throw new AppError(501, "Merchant account consent is not enabled. PayPal requires an approved partner integration with seller-consent and transaction-search permissions. No account was connected.", "PAYPAL_OAUTH_UNAVAILABLE");
 }));
 paypalRoutes.get("/account", asyncHandler(async (req, res) => success(res, await getPaypalAccount(getUserId(req)))));
-paypalRoutes.post("/diagnostics", checkoutLimit, asyncHandler(async (req, res) =>
-  success(res, await diagnosePaypalAccess(getUserId(req)))));
-paypalRoutes.post("/sync", validateBody(syncBody), asyncHandler(async (req, res) =>
-  success(res, await syncPaypalTransactions(getUserId(req), req.body.startDate, req.body.endDate))));
+paypalRoutes.post("/diagnostics", checkoutLimit, asyncHandler(async (req, res) => {
+  const diagnostic = await diagnosePaypalAccess(getUserId(req));
+  return success(res, { canSync: diagnostic.canSync });
+}));
+paypalRoutes.post("/sync", validateBody(syncBody), asyncHandler(async (req, res) => {
+  try {
+    await syncPaypalTransactions(getUserId(req), req.body.startDate, req.body.endDate);
+    return success(res, { synchronized: true });
+  } catch (error) {
+    console.error("PayPal transaction synchronization failed", {
+      code: error instanceof AppError ? error.code : "UNEXPECTED_ERROR",
+    });
+    throw new AppError(502, "Unable to synchronize PayPal transactions. Please try again.", "PAYPAL_SYNC_FAILED");
+  }
+}));
 paypalRoutes.post("/orders", checkoutLimit, asyncHandler(async (req, res) => {
   const input = checkoutBody.parse(req.body);
   const idempotencyKey = z.string().uuid().safeParse(req.header("Idempotency-Key"));

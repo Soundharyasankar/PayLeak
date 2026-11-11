@@ -19,8 +19,8 @@ fees or rates.
 | GET | `/paypal/connect` | Currently reports unavailable until an approved partner integration is configured |
 | GET | `/paypal/config` | Report configured environment and whether Sandbox Checkout credentials are configured; no secrets returned |
 | GET | `/paypal/account` | Get the authenticated user's stored PayPal account status |
-| POST | `/paypal/diagnostics` | Check app OAuth and Transaction Search permission separately; returns no token or transaction contents |
-| POST | `/paypal/sync` | Sync configured owner's PayPal Transaction Search data |
+| POST | `/paypal/diagnostics` | Check whether PayPal transaction synchronization is available; returns a minimal status only |
+| POST | `/paypal/sync` | Sync configured owner's PayPal Transaction Search data; returns a minimal completion status |
 | POST | `/paypal/orders` | Create an idempotent Sandbox Checkout order |
 | POST | `/paypal/orders/:orderId/capture` | Verify buyer approval, capture server-side, and save the completed capture in MongoDB |
 | POST | `/paypal/orders/:orderId/cancel` | Verify order state and record cancellation only for a PayPal-voided order |
@@ -42,8 +42,8 @@ fees or rates.
 | POST | `/invoices/assistant` | Send a natural-language invoice turn and receive schema-validated draft updates plus the next required-field question |
 | POST | `/invoices/local-draft` | Idempotently persist a completed local draft using `assistantSessionId` before PayPal synchronization |
 | POST | `/invoices` | Create a PayPal Sandbox draft first, then save the confirmed invoice for the authenticated merchant owner |
-| POST | `/invoices/paypal/diagnostics` | Verify PayPal OAuth, invoice API access, and the first Invoicing API page |
-| POST | `/invoices/sync-paypal` | Retrieve PayPal invoice pages/details and import or update them for the configured owner |
+| POST | `/invoices/paypal/diagnostics` | Verify PayPal invoice API access; returns only an authorized/unavailable status |
+| POST | `/invoices/sync-paypal` | Retrieve and sync PayPal invoices for the configured owner; returns a minimal completion status |
 | POST | `/invoices/:id/paypal` | Create an existing local draft in PayPal and link the confirmed PayPal invoice to that same MongoDB record |
 | GET | `/invoices/:id` | Get one invoice |
 | PUT | `/invoices/:id` | Update an invoice |
@@ -67,14 +67,25 @@ fees or rates.
 | PATCH | `/notifications/read-all` | Mark all notifications read |
 | PATCH | `/notifications/:id` | Set a notification's read state |
 | DELETE | `/notifications/:id` | Delete a notification |
-| POST | `/notifications/reminders/:invoiceId/draft` | Create a reminder draft without sending |
-| POST | `/notifications/reminders/:invoiceId/send` | Currently unavailable; no email is sent |
+| POST | `/notifications/reminders/:invoiceId/draft` | Save or return the single active reminder draft for an overdue invoice; requires an accessible MongoDB invoice `_id` and valid invoice/client recipient email; never sends email |
+| POST | `/notifications/reminders/:invoiceId/send` | Currently unavailable; verifies invoice access and a saved draft, then returns an explicit error without sending |
 | POST | `/ai/chat` | Ask the AI to explain stored financial data |
 | POST | `/ai/assistant` | AI chat alias |
-| POST | `/ai/financial-agent` | Resolve an authenticated client, calculate client or business summaries from owned client/invoice/transaction records, then generate a grounded answer; accepts optional `contextClientId`, `selectedClientId`, `periodStart`, and `periodEnd` |
+| POST | `/ai/financial-agent` | Resolve an authenticated client, calculate client or business summaries from owned client/invoice/transaction records, then generate a grounded answer; account-wide analysis includes up to ten newest transaction facts without payer identity or client identifiers; accepts optional `contextClientId`, `selectedClientId`, `periodStart`, and `periodEnd` |
 | POST | `/ai/reports/client` | Generate a client financial PDF, store its metadata and document in MongoDB, and return a report ID; body accepts `clientId` and optional period bounds |
 | GET | `/ai/reports/:reportId/download` | Download a generated PDF after verifying report ownership |
 | POST | `/ai/diagnostics` | Test Google Gemini key availability, model, and API connectivity without returning credentials |
+
+Reminder drafts are stored separately from notifications and are unique per invoice
+while in `draft` status. The reminder endpoint uses the same invoice access scope as
+invoice listing: the authenticated user's invoices plus PayPal invoices in the
+configured shared integration. It looks up the MongoDB invoice `_id` (the frontend's
+`invoice.id`), not the PayPal invoice ID. A linked client is resolved using both its
+MongoDB `_id` and the invoice owner's `userId`; the recipient is taken from that
+verified client record or the recipient email saved on the invoice. Invalid or missing
+recipients fail before a draft is stored. The active-draft unique index and atomic
+upsert make repeat clicks and retries return the existing draft instead of creating
+duplicates. Sending is not configured; a draft is not represented as sent or delivered.
 
 Transaction analysis uses only fields returned by PayPal Transaction Search and PayLeak's
 deterministic decimal calculation. A calculated net is available only for a non-refund
@@ -82,8 +93,26 @@ transaction when the actual PayPal gross and fee use the same currency. Verifica
 statuses are `MATCH`, `MISMATCH`, `NOT_AVAILABLE`, or `NOT_APPLICABLE`; a PayPal refresh
 updates the selected transaction from Transaction Search and does not infer a bank payout.
 
+The authenticated Transactions API view also exposes a PayPal invoice reference and
+sanitized transaction item descriptions when present. The AI Assistant's payment-history
+panel matches that reference only to a unique invoice belonging to the authenticated
+account. It displays the linked invoice's client label only when it is not an email
+address, and shows an invoice project only when one is explicitly present. PayPal item
+descriptions are labeled as payment details, not inferred project names. These labels
+remain in the authenticated UI and are not added to account-wide Gemini context.
+
 The client financial agent uses deterministic backend calculations before requesting
-an AI explanation. It associates transactions by stored client ID or exact registered
+an AI explanation. Account-wide prompts include at most the ten newest owner-scoped
+MongoDB transactions with a masked PayPal transaction identifier, date, status, gross,
+actual fee, reported net, calculated net, and available conversion facts. Payer names, payer emails,
+client names, and client IDs are excluded from this account-wide prompt. Gemini receives
+only that bounded transaction slice and currency-separated backend totals, not invoice
+or client identity records. The response identifies Sandbox data as test data when the
+configured PayPal environment is Sandbox. The backend logs the Gemini model, environment,
+and number of transaction records included without logging transaction contents. The
+financial-agent answer is returned as Markdown and the frontend renders headings, lists,
+and tables as text without interpreting raw HTML.
+It associates transactions by stored client ID or exact registered
 client email, and falls back to an exact unique payer-name match only when PayPal
 provides no payer email; an explicit client ID always takes precedence. Analysis
 reuses the owner-scoped transaction retrieval service used by the Transactions API
@@ -97,13 +126,21 @@ separately and never added to received revenue. Amounts remain grouped by
 currency. The summary distinguishes gross receipts after recorded transaction
 fees from net profit. Client net profit and project profitability are marked
 unavailable because this installation has no project or project-expense models.
+Transactions may have an optional registered `clientId`; invoices may have an optional
+`clientId` and a free-form project string. The transaction schema has no normalized
+invoice relation, but PayPal's raw transaction response may contain an invoice
+identifier; the payment-history panel uses an exact, unique match to an owned invoice
+for display only. There is no project entity, so a project is shown only when the linked
+invoice explicitly provides one. The account-wide agent does not infer a client or
+project from a payer label or transaction description.
 Generated PDFs are stored with user ownership metadata and downloaded through
 the authenticated route; creation and download are rate-limited.
 
 AI chat accepts `{ "question": "...", "history": [{ "role": "user|assistant", "text": "..." }] }`.
 The backend fetches transactions, invoices, and currency conversions using the
-authenticated user's ID and sends only those records plus recent conversation turns
-to Google Gemini. Conversation history is kept in the current frontend session and
+authenticated user's ID and sends financial facts plus recent conversation turns
+to Google Gemini; transaction IDs are masked and account-wide invoice customer names
+and email addresses are omitted. Conversation history is kept in the current frontend session and
 is not stored in MongoDB. Set `GEMINI_API_KEY` and `GEMINI_MODEL` in the backend
 environment (`gemini-3.5-flash-lite` by default; `gemini-2.5-flash` was not
 available to this AI Studio key when verified). Diagnostics makes a minimal Gemini
@@ -114,9 +151,10 @@ Transaction AI analysis reads only the authenticated user's stored PayPal
 transaction record. PayLeak calculates same-currency net-after-fee and fee
 percentage using decimal arithmetic; Gemini only produces explanatory text,
 insights, and recommendations and is not allowed to provide financial amounts.
-Payer identity is omitted from the LLM prompt. Missing exchange-rate benchmarks,
-withdrawal records, and bank settlement data remain unavailable rather than
-being estimated. Pass `?regenerate=true` to request a fresh explanation.
+Payer names are omitted from the LLM prompt; only whether payer identity is
+available is included. Missing exchange-rate benchmarks, withdrawal records,
+and bank settlement data remain unavailable rather than being estimated. Pass
+`?regenerate=true` to request a fresh explanation.
 
 `POST /paypal/orders` requires an `Idempotency-Key` UUID header and a validated
 amount, currency, and description. The browser redirects the buyer to PayPal's
@@ -190,9 +228,9 @@ in PayPal Developer Dashboard.
 Postman Sandbox workflow:
 1. Sign in with `POST /api/auth/login` and retain the HTTP-only cookie (or set a
    bearer JWT). Use the backend base URL `http://localhost:5000/api`.
-2. Call `POST /api/invoices/paypal/diagnostics` with `{}`. Verify the Sandbox
-   environment, configured owner, OAuth result, and invoice API HTTP status.
-   OAuth alone does not verify invoice write access.
+2. Call `POST /api/invoices/paypal/diagnostics` with `{}`. The response reports
+   only whether invoice API access is authorized or unavailable. It does not
+   verify invoice creation or sending permissions.
 3. Call `POST /api/invoices` with a UUID `Idempotency-Key` header and a validated
    body, for example:
    `{ "client": "Sandbox Buyer", "email": "<Sandbox buyer email>", "amount": "10.00", "currency": "USD", "description": "Sandbox test service", "date": "2026-11-09", "due": "2026-11-16" }`.
@@ -205,28 +243,27 @@ Postman Sandbox workflow:
 5. To send a confirmed draft, call
    `POST /api/invoices/{mongo_invoice_id}/send`. This emails the invoice to the
    Sandbox recipient; use only a Sandbox buyer address.
-6. Call `POST /api/invoices/sync-paypal` twice. Compare PayPal's `total_items`,
-   full detail retrieval count, MongoDB insert/update counts, and stored total.
-   The second run should update existing IDs rather than insert duplicates.
+6. Call `POST /api/invoices/sync-paypal` twice. Each successful response
+   contains only `{ "synchronized": true }`; use the invoice list to inspect
+   imported records. Synchronization upserts by PayPal invoice ID, so repeating
+   it does not create duplicates.
 PayPal invoice import uses the separate Invoicing API
 `GET /v2/invoicing/invoices?page=1&page_size=100&total_required=true`. The token's
 reported OAuth scope claims are shown separately from observed API access,
 because successful Invoicing API requests may succeed when a scope is not listed
 in the OAuth response. It paginates all returned pages and upserts by authenticated `userId` plus PayPal
 invoice ID. Import does not create invoices in PayPal or delete local invoices.
-The sync response reports OAuth app ID, scope/access diagnostics, page counts,
-insert/update/duplicate totals, and the MongoDB invoice count without returning
-credentials or access tokens. PayPal does not return the merchant identity for
-client-credentials invoice-list requests; verify the REST app's Sandbox Business
-association in the PayPal Developer Dashboard.
+The sync endpoint returns only a completion status and does not expose
+diagnostic metadata. Detailed diagnostics remain internal to the backend.
+PayPal does not return the merchant identity for client-credentials
+invoice-list requests; verify the REST app's Sandbox Business association in
+the PayPal Developer Dashboard.
 `POST /transactions/sync` accepts a date range of up to three years and queries
 PayPal in consecutive 30-day windows, requesting `fields=all` and paging through
-each response. Its result includes the OAuth app ID (never the client secret or
-access token), per-page HTTP and result counts, inserted/refreshed/duplicate
-counts, and MongoDB totals for the owner and requested date range. A successful
-response reports only records actually returned by PayPal; the API does not
-assert that the Sandbox account's Developer Dashboard history matches the
-authorized REST app.
+each response. Its successful result contains only `{ "synchronized": true }`;
+detailed synchronization diagnostics remain internal to the backend. A
+successful response confirms completion, not that the Sandbox account's
+Developer Dashboard history matches the authorized REST app.
 
 `GET /transactions` accepts `page`, `limit` (maximum 100), `from`, `to`,
 `currency`, and `status` query parameters. Browser login/register responses do

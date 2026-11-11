@@ -20,7 +20,10 @@ notificationRoutes.post("/reminders/:invoiceId/draft", asyncHandler(async (req, 
   const { id } = idParam.parse({ id: req.params.invoiceId });
   return success(res, await draftReminder(getUserId(req), id));
 }));
-notificationRoutes.post("/reminders/:invoiceId/send", asyncHandler(async (_req, res) => success(res, await sendReminder())));
+notificationRoutes.post("/reminders/:invoiceId/send", asyncHandler(async (req, res) => {
+  const { id } = idParam.parse({ id: req.params.invoiceId });
+  return success(res, await sendReminder(getUserId(req), id));
+}));
 notificationRoutes.patch("/:id", asyncHandler(async (req, res) => {
   const { id } = idParam.parse(req.params);
   const parsed = readBody.safeParse(req.body);

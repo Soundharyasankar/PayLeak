@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/utils/invoiceAgent.test.js src/utils/paypalWelcome.test.js"
+    "test": "node --test src/utils/invoiceAgent.test.js src/utils/paypalWelcome.test.js src/utils/paypalLeakCalculator.test.js src/utils/markdown.test.js src/utils/transactionContext.test.js"
   },
   "dependencies": {
     "axios": "^1.7.9",

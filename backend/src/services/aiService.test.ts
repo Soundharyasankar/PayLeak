@@ -3,7 +3,12 @@ import test from "node:test";
 import { ApiError } from "@google/genai";
 import {
   financialContextFilters,
+  hasOnlyEvidenceNumbers,
+  appendEvidenceBasedRecommendations,
+  appendVerifiedNetTable,
+  maskTransactionId,
   parseInvoiceUnderstandingResponse,
+  removeUnverifiedFinancialClaims,
   toFriendlyError,
   toGeminiHistory,
 } from "./aiService.js";
@@ -25,6 +30,54 @@ test("maps conversation history to Gemini user and model roles", () => {
     { role: "user", parts: [{ text: "Question" }] },
     { role: "model", parts: [{ text: "Answer" }] },
   ]);
+});
+
+test("accepts only numeric claims already present in financial evidence", () => {
+  const evidence = JSON.stringify({ amount: "23.36", count: 7, date: "2026-11-07" });
+  assert.equal(hasOnlyEvidenceNumbers("The recorded fee was 23.36 across 7 records.", evidence), true);
+  assert.equal(hasOnlyEvidenceNumbers("The recorded fee was 24.00.", evidence), false);
+});
+
+test("masks PayPal transaction identifiers before financial context is sent", () => {
+  assert.equal(maskTransactionId("8YU20791MA949721H"), "masked-721H");
+  assert.equal(maskTransactionId("PAY-2"), "masked");
+});
+
+test("adds a verified net table when financial evidence has calculated but no reported net", () => {
+  const answer = appendVerifiedNetTable("## Executive summary\nThe PayPal-reported net is unavailable.", "Compare gross, fees, and net for my transactions.", {
+    recentTransactions: [{
+      transactionId: "8YU20791MA949721H",
+      reportedNet: { amount: null, currency: null, source: "unavailable" },
+      calculatedNet: { amount: "190.44", currency: "USD", source: "payleak_calculation" },
+    }],
+  });
+
+  test("adds evidence-based recommendations when a savings question omits them", () => {
+    const answer = appendEvidenceBasedRecommendations(
+      "## Executive summary\nThe records include actual fees and some unavailable fee data.",
+      "Summarize my financial performance and identify areas where I can save money.",
+    );
+    assert.match(answer, /## Recommendations/);
+    assert.match(answer, /fee schedule that applies to your account/);
+    assert.match(answer, /missing fee, conversion, withdrawal, or settlement details/);
+  });
+  assert.match(answer, /\| Masked transaction ID \| PayPal-reported net \| PayLeak-calculated net \|/);
+  assert.match(answer, /\| masked-721H \| Unavailable \| 190\.44 USD \|/);
+  assert.equal(answer.includes("8YU20791MA949721H"), false);
+  assert.equal(appendVerifiedNetTable(answer, "Compare transaction net amounts.", {
+    recentTransactions: [{ transactionId: "masked-721H", calculatedNet: { amount: "190.44", currency: "USD" } }],
+  }), answer);
+});
+
+test("removes complete financial claims containing unverified numbers", () => {
+  const evidence = JSON.stringify({ amount: "23.36", count: 7 });
+  assert.deepEqual(removeUnverifiedFinancialClaims(
+    "The recorded fee was 23.36 across 7 records. Estimated loss is 99.00. Other costs are unavailable.",
+    evidence,
+  ), {
+    answer: "The recorded fee was 23.36 across 7 records.\nOther costs are unavailable.",
+    omittedClaims: true,
+  });
 });
 
 test("normalizes Gemini's top-level invoice fields and aliases to canonical updates", () => {

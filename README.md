@@ -42,27 +42,46 @@ buyer account and have not been verified here.
 Checkout testing does **not** link a merchant account. Seller-consent account
 linking separate sellers requires an eligible PayPal partner application and
 seller-consent permissions; `GET /api/paypal/connect` reports this as
-unavailable, not connected. For one merchant, the backend can use that
-merchant's own REST app credentials only when PayPal grants Transaction Search
-permission and an operator has verified and bound the designated PayLeak user
-via immutable `PAYPAL_ACCOUNT_OWNER_USER_ID`. An email address is not proof of
-ownership. `POST /api/paypal/diagnostics` checks application OAuth and the
-Transaction Search permission separately without returning transaction
-contents or credentials.
+unavailable, not connected. For one merchant, the backend uses that merchant's
+REST app credentials and the designated PayLeak user configured through
+`PAYPAL_ACCOUNT_OWNER_USER_ID`. An email address is not proof of ownership.
+`POST /api/paypal/diagnostics` checks application OAuth and Transaction Search
+API access separately without returning transaction contents or credentials.
 
-The current configured Sandbox app successfully obtains an OAuth app token,
-but a real Transaction Search request returned HTTP 403. The Dashboard routes
-users to the diagnostic/authorization page instead of implying Sync is ready.
-Enable Transaction Search for that Sandbox REST app (or obtain the eligible
-partner access required for third-party sellers) before syncing. The
-authenticated Transactions page reads stored records with server-side
-pagination, date/status/currency filters, and per-transaction details.
+On 2026-11-11, read-only Sandbox checks using the configured backend credentials
+received HTTP 200 from OAuth, Transaction Search, and PayPal invoice listing.
+The Transaction Search response reported six records for the tested date range;
+the invoice list also returned an item. These checks verify API read access, not
+MongoDB synchronization or invoice write/send operations. Repeat them after
+changing credentials or PayPal app permissions. The authenticated Transactions
+page reads stored records with server-side pagination, date/status/currency
+filters, and per-transaction details.
 
-Invoice drafts are stored in MongoDB. PayPal invoice delivery, reminder email,
-and exchange-rate quote requests remain explicitly unavailable until their
-respective PayPal permissions or delivery integration are configured. Financial
-reports preserve source currencies and do not invent missing fee or conversion
-values.
+An authenticated end-to-end Sandbox test on 2026-11-11 also synchronized PayPal
+transactions through the backend route, verified seven owner-scoped records in
+MongoDB, and submitted the latest seven transaction facts to Gemini through the
+financial-agent route. The context included masked PayPal transaction identifiers, dates,
+statuses, gross amounts, actual fees when available, and stored net verification
+and conversion values. Six of the seven records had an actual recorded fee.
+Payer names, payer emails, and client identities were excluded from this
+account-wide AI prompt. Gemini generated a response that identified the data as
+Sandbox test data. The assistant sends no more than the ten newest transaction
+facts alongside currency-separated backend totals; detailed transaction
+contents are not written to the AI-context telemetry log. Financial-agent
+answers use Markdown headings, lists, and tables where appropriate, rendered as
+safe text in the frontend.
+
+Invoice creation, updating, sending, and synchronization are implemented using
+the PayPal Invoicing API, but require the relevant permissions on the merchant's
+Sandbox app. Invoice list/read access alone does not prove write or send access.
+Reminder email and PayPal exchange-rate quote requests remain unavailable
+without their separate provider integrations/permissions. Financial reports
+preserve source currencies and do not invent missing fee or conversion values.
+
+Overdue reminder drafts are persisted once per invoice, use the invoice's verified
+client or recipient email, and can be reviewed in the Notifications page. Drafting does
+not send email. The send endpoint remains unavailable until an email provider is
+configured and confirms submission.
 
 The AI Assistant provides client-specific analysis from owner-scoped client,
 invoice, and PayPal transaction records, with currency-separated totals,
@@ -72,6 +91,12 @@ project-expense records, so complete net profit and project profitability are
 explicitly marked undetermined. PDF reports require the configured Gemini
 service for report insights and are stored with user-scoped metadata and
 download authorization.
+
+The AI Assistant's payment-history panel uses exact PayPal invoice references from
+transactions to display a uniquely linked invoice's non-email client label and explicit
+project name when available. PayPal item descriptions are shown separately as payment
+details; they are not treated as project names or included in account-wide Gemini
+context.
 
 API contracts are documented in
 [`docs/API_CONTRACTS.md`](./docs/API_CONTRACTS.md). Backend startup must

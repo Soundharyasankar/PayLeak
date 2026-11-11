@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
-import { Bell, Check, CheckCheck, CircleDollarSign, FileText, Lightbulb, MoreHorizontal, Send, Sparkles, Trash2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Bell, Check, CheckCheck, CircleDollarSign, FileText, Lightbulb, MoreHorizontal, Sparkles, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import Modal from "../components/Modal.jsx";
 import PageHeader from "../components/PageHeader.jsx";
 import { useAppData } from "../context/AppContext.jsx";
-import { draftReminder as requestReminderDraft, sendReminder } from "../services/notificationService.js";
+import { draftReminder as requestReminderDraft } from "../services/notificationService.js";
 
 const categories = ["All notifications", "Payment", "Invoice", "Financial alert", "AI recommendation", "Sync"];
 const categoryIcon = { Payment: CircleDollarSign, Invoice: FileText, "Financial alert": Bell, "AI recommendation": Lightbulb, Sync: Bell };
@@ -13,9 +13,8 @@ export default function Notifications() {
   const { notifications, updateNotification, updateNotifications, removeNotification, invoices } = useAppData();
   const [filter, setFilter] = useState("All notifications");
   const [reminder, setReminder] = useState(null);
-  const [reminderText, setReminderText] = useState("");
-  const [reminderError, setReminderError] = useState("");
   const [working, setWorking] = useState(false);
+  const draftRequestInFlight = useRef(false);
   const filtered = useMemo(() => filter === "All notifications" ? notifications : notifications.filter((item) => item.category === filter), [notifications, filter]);
   const unread = notifications.filter((item) => item.unread).length;
 
@@ -46,30 +45,22 @@ export default function Notifications() {
   };
 
   const prepareReminder = async (invoice) => {
+    if (draftRequestInFlight.current) return;
+    draftRequestInFlight.current = true;
     setWorking(true);
-    setReminderError("");
     try {
       const draft = await requestReminderDraft(invoice.id);
-      setReminder({ ...invoice, email: draft.to });
-      setReminderText(draft.message);
+      setReminder({ ...invoice, draftId: draft.id, to: draft.to, subject: draft.subject, message: draft.message });
+      toast.success(draft.created ? "Reminder draft created successfully." : "Existing reminder draft is ready to review.");
     } catch (error) {
-      toast.error(error.response?.data?.error?.message || "Could not prepare a reminder.");
+      const code = error.response?.data?.error?.code;
+      const message = error.response?.data?.error?.message
+        || (code === "INVOICE_NOT_FOUND"
+          ? "This invoice could not be found. Please refresh your invoice list."
+          : "Unable to create the reminder right now. Please try again.");
+      toast.error(message);
     } finally {
-      setWorking(false);
-    }
-  };
-
-  const submitReminder = async () => {
-    if (!reminderText.trim()) return toast.error("Add a reminder message before continuing.");
-    setWorking(true);
-    setReminderError("");
-    try {
-      await sendReminder(reminder.id);
-      toast.success("Reminder sent.");
-      setReminder(null);
-    } catch (error) {
-      setReminderError(error.response?.data?.error?.message || "Reminder delivery is not configured. Nothing was sent.");
-    } finally {
+      draftRequestInFlight.current = false;
       setWorking(false);
     }
   };
@@ -87,12 +78,18 @@ export default function Notifications() {
           })}
           {filtered.length === 0 && <div className="empty-state"><Bell size={24} /><b>No notifications</b><span>New account notifications will appear here.</span></div>}
         </section>
-        <aside className="reminder-panel panel"><div className="panel-heading"><div><h2>Overdue follow-ups</h2><p>Review and approve before delivery</p></div><MoreHorizontal size={17} /></div>
-          {invoices.filter((invoice) => invoice.status === "Overdue").map((invoice) => <div className="overdue-reminder" key={invoice.id}><div className="overdue-icon"><FileText size={16} /></div><div className="overdue-info"><b>{invoice.client}</b><small>{invoice.invoiceNumber || invoice.id} · {new Intl.NumberFormat("en-US", { style: "currency", currency: invoice.currency }).format(Number(invoice.amount))}</small><span>Due {invoice.due || "date not specified"}</span></div><button className="button secondary small-button" onClick={() => void prepareReminder(invoice)} disabled={working}>Draft reminder</button></div>)}
-          <div className="reminder-note"><Sparkles size={15} /><span>Reminder drafts are stored only when sent through a configured delivery integration. PayLeak will report if delivery is unavailable.</span></div>
+        <aside className="reminder-panel panel"><div className="panel-heading"><div><h2>Overdue follow-ups</h2><p>Review saved drafts; email is not sent</p></div><MoreHorizontal size={17} /></div>
+          {invoices.filter((invoice) => invoice.status === "Overdue").map((invoice) => <div className="overdue-reminder" key={invoice.id}><div className="overdue-icon"><FileText size={16} /></div><div className="overdue-info"><b>{invoice.client}</b><small>{invoice.invoiceNumber || invoice.id} · {new Intl.NumberFormat("en-US", { style: "currency", currency: invoice.currency }).format(Number(invoice.amount))}</small><span>Due {invoice.due || "date not specified"}</span></div><button className="button secondary small-button" onClick={() => void prepareReminder(invoice)} disabled={working}>{working ? <><span className="spinner" /> Creating…</> : "Draft reminder"}</button></div>)}
+          <div className="reminder-note"><Sparkles size={15} /><span>Reminder drafts are saved in PayLeak. Email delivery is not configured, so drafts are not sent.</span></div>
         </aside>
       </div>
-      {reminder && <Modal title="Review invoice reminder" onClose={() => { setReminder(null); setReminderError(""); }}><div className="reminder-preview-label"><span>TO</span><b>{reminder.client} · {reminder.email}</b></div><label className="field-label">Message preview<textarea className="reminder-textarea" rows="8" value={reminderText} onChange={(event) => setReminderText(event.target.value)} /></label>{reminderError && <p className="text-red">{reminderError}</p>}<p className="muted small-copy">The backend must confirm delivery. Approval alone never marks a reminder as sent.</p><div className="modal-actions"><button className="button secondary" onClick={() => setReminder(null)}>Cancel</button><button className="button primary" onClick={submitReminder} disabled={working}>{working ? <span className="spinner" /> : <><Send size={15} /> Send reminder</>}</button></div></Modal>}
+      {reminder && <Modal title="Reminder draft ready to review" onClose={() => setReminder(null)}>
+        <div className="reminder-preview-label"><span>TO</span><b>{reminder.to}</b></div>
+        <div className="reminder-preview-label"><span>SUBJECT</span><b>{reminder.subject}</b></div>
+        <label className="field-label">Message preview<textarea className="reminder-textarea" rows="8" value={reminder.message} readOnly /></label>
+        <p className="muted small-copy">Saved as a draft only. PayLeak email delivery is not configured; no email was sent.</p>
+        <div className="modal-actions"><button className="button primary" onClick={() => setReminder(null)}>Close</button></div>
+      </Modal>}
     </div>
   );
 }

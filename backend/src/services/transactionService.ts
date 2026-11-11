@@ -26,7 +26,7 @@ export function ownedTransactionFilter(userId: string) {
 
 export async function listOwnedTransactionsForFinancialAnalysis(userId: string, limit: number) {
   return Transaction.find(await sharedPaypalDataFilter(userId))
-    .select("clientId paypalTransactionId transactionType status grossAmount grossCurrency feeAmount feeCurrency feeSource paypalReportedNetAmount paypalReportedNetCurrency payleakCalculatedNetAmount payleakCalculatedNetCurrency conversion withdrawalFeeAmount withdrawalFeeCurrency transactionDate rawPaypal")
+    .select("clientId paypalTransactionId transactionType status grossAmount grossCurrency feeAmount feeCurrency feeSource paypalReportedNetAmount paypalReportedNetCurrency payleakCalculatedNetAmount payleakCalculatedNetCurrency netVerificationStatus netVerificationDifference conversion withdrawalFeeAmount withdrawalFeeCurrency transactionDate rawPaypal")
     .sort({ transactionDate: -1 })
     .limit(limit)
     .lean();
@@ -111,11 +111,52 @@ interface TransactionView {
   rawPaypal: unknown;
 }
 
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function safePaymentText(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return value.trim()
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email omitted]")
+    .slice(0, 160);
+}
+
+export function getTransactionPaymentContext(rawPaypal: unknown) {
+  const raw = objectValue(rawPaypal);
+  const transactionInfo = objectValue(raw?.transaction_info);
+  const cartInfo = objectValue(raw?.cart_info);
+  const invoiceReference = [cartInfo?.paypal_invoice_id, transactionInfo?.invoice_id]
+    .find((value): value is string => typeof value === "string" && Boolean(value.trim()))
+    ?.trim() ?? null;
+  const itemDetails = Array.isArray(cartInfo?.item_details)
+    ? cartInfo.item_details.flatMap((item) => {
+      const details = objectValue(item);
+      const text = [
+        safePaymentText(details?.item_name),
+        safePaymentText(details?.item_description),
+      ].filter((value): value is string => Boolean(value));
+      const description = [...new Set(text)].join(" — ");
+      return description ? [description] : [];
+    }).slice(0, 5)
+    : [];
+  const subject = safePaymentText(transactionInfo?.transaction_subject);
+  if (itemDetails.length === 0 && subject) itemDetails.push(subject);
+  return { invoiceReference, itemDetails };
+}
+
 function toFrontendTransaction(record: TransactionView) {
-  const payer = (record.rawPaypal as { payer_info?: { payer_name?: { alternate_full_name?: string } } })?.payer_info;
+  const rawPaypal = objectValue(record.rawPaypal);
+  const payer = objectValue(rawPaypal?.payer_info);
+  const payerName = objectValue(payer?.payer_name);
+  const { invoiceReference, itemDetails } = getTransactionPaymentContext(record.rawPaypal);
   return {
     id: record.paypalTransactionId,
-    client: payer?.payer_name?.alternate_full_name ?? "Unknown payer",
+    client: typeof payerName?.alternate_full_name === "string" ? payerName.alternate_full_name : "Unknown payer",
+    invoiceReference,
+    itemDetails,
     gross: record.grossAmount,
     currency: record.grossCurrency,
     fee: record.feeAmount,

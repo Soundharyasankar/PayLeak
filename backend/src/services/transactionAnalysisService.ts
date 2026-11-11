@@ -396,7 +396,7 @@ export async function analyzeOwnedTransaction(userId: string, transactionId: str
     : null;
   const currentFacts = {
     transaction: {
-      payer: payerName(transaction.rawPaypal),
+      payerIdentityAvailable: payerName(transaction.rawPaypal) !== null,
       type: transaction.transactionType,
       status: transaction.status,
       date: transaction.transactionDate.toISOString(),

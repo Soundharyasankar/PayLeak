@@ -4,11 +4,12 @@ export async function askAssistant(question, history = []) {
   return responseData(await api.post(endpoints.chat, { question, history }, { timeout: 40_000 }));
 }
 
-export async function askFinancialAgent(question, contextClientId, selectedClientId) {
+export async function askFinancialAgent(question, contextClientId, selectedClientId, history = []) {
   return responseData(await api.post("/ai/financial-agent", {
     question,
     ...(contextClientId ? { contextClientId } : {}),
     ...(selectedClientId ? { selectedClientId } : {}),
+    history: history.slice(-12),
   }, { timeout: 60_000 }));
 }
 

@@ -6,7 +6,9 @@ import { FinancialReport } from "../models/FinancialReport.js";
 import { Invoice } from "../models/Invoice.ts";
 import { AppError } from "../utils/errors.js";
 import { formatCurrencyAmount } from "../utils/money.js";
-import { generateFinancialAgentAnswer } from "./aiService.js";
+import { env } from "../config/env.js";
+import { generateFinancialAgentAnswer, type ConversationMessage } from "./aiService.js";
+import { calculateNetFromActual } from "./financial.js";
 import { listOwnedTransactionsForFinancialAnalysis } from "./transactionService.ts";
 import { sharedPaypalInvoiceFilter } from "./paypalIntegrationService.js";
 
@@ -31,7 +33,9 @@ type FinancialTransaction = {
   paypalReportedNetCurrency?: string | null;
   payleakCalculatedNetAmount?: string | null;
   payleakCalculatedNetCurrency?: string | null;
-  conversion?: { source: string; sourceAmount?: string | null; sourceCurrency?: string | null; targetAmount?: string | null; targetCurrency?: string | null; exchangeRate?: string | null; convertedAt?: Date | null };
+  netVerificationStatus?: string | null;
+  netVerificationDifference?: string | null;
+  conversion?: { source: string; sourceAmount?: string | null; sourceCurrency?: string | null; targetAmount?: string | null; targetCurrency?: string | null; exchangeRate?: string | null; rateDirection?: string | null; convertedAt?: Date | null };
   withdrawalFeeAmount?: string | null;
   withdrawalFeeCurrency?: string | null;
   transactionDate: Date;
@@ -86,6 +90,21 @@ function isRefundOrReversal(transaction: FinancialTransaction) {
 
 function isSuccessful(transaction: FinancialTransaction) {
   return ["S", "COMPLETED", "SUCCESS", "SUCCEEDED"].includes(transaction.status.trim().toUpperCase());
+}
+
+function calculatedNetFor(transaction: FinancialTransaction) {
+  const storedAmount = parseAmount(transaction.payleakCalculatedNetAmount);
+  if (storedAmount && transaction.payleakCalculatedNetCurrency) {
+    return { amount: transaction.payleakCalculatedNetAmount!, currency: transaction.payleakCalculatedNetCurrency };
+  }
+  if (!isSuccessful(transaction) || isRefundOrReversal(transaction) || transaction.feeSource !== "actual_paypal") return null;
+  const amount = calculateNetFromActual(
+    transaction.grossAmount,
+    transaction.grossCurrency,
+    transaction.feeAmount ?? null,
+    transaction.feeCurrency ?? null,
+  );
+  return amount ? { amount, currency: transaction.grossCurrency } : null;
 }
 
 function normalizeAssociation(value?: string | null) {
@@ -224,9 +243,7 @@ export function calculateClientFinancialSummary(
     reportedNet: transaction.paypalReportedNetAmount
       ? { amount: transaction.paypalReportedNetAmount, currency: transaction.paypalReportedNetCurrency }
       : null,
-    calculatedNet: transaction.payleakCalculatedNetAmount
-      ? { amount: transaction.payleakCalculatedNetAmount, currency: transaction.payleakCalculatedNetCurrency }
-      : null,
+    calculatedNet: calculatedNetFor(transaction),
     conversion: transaction.conversion?.source === "actual_paypal"
       ? {
         exchangeRate: transaction.conversion.exchangeRate ?? null,
@@ -539,9 +556,57 @@ export function accountFinancialEvidence(
   const unlinkedTransactions = transactions.filter((transaction) =>
     !clients.some((client) => matchesClient(client, transaction, clients))).length;
   const clientsWithTransactions = summaries.filter((summary) => summary.counts.transactions > 0).length;
+  const recentTransactions = transactions.slice(0, 10).map((transaction) => {
+    const fee = transaction.feeSource === "actual_paypal" ? parseAmount(transaction.feeAmount) : null;
+    const actualFeeAvailable = Boolean(fee && transaction.feeCurrency);
+    const reportedNet = parseAmount(transaction.paypalReportedNetAmount);
+    const calculatedNet = calculatedNetFor(transaction);
+    const conversion = transaction.conversion?.source === "actual_paypal"
+      ? {
+        source: "actual_paypal",
+        sourceAmount: transaction.conversion.sourceAmount ?? null,
+        sourceCurrency: transaction.conversion.sourceCurrency ?? null,
+        targetAmount: transaction.conversion.targetAmount ?? null,
+        targetCurrency: transaction.conversion.targetCurrency ?? null,
+        exchangeRate: transaction.conversion.exchangeRate ?? null,
+        rateDirection: transaction.conversion.rateDirection ?? null,
+        convertedAt: transaction.conversion.convertedAt?.toISOString() ?? null,
+      }
+      : { source: "unavailable" };
+    return {
+      transactionId: transaction.paypalTransactionId,
+      date: transaction.transactionDate.toISOString(),
+      type: transaction.transactionType,
+      status: transaction.status,
+      kind: isRefundOrReversal(transaction) ? "refund_or_reversal" : "payment_or_other",
+      gross: {
+        amount: transaction.grossAmount,
+        currency: transaction.grossCurrency,
+        source: "actual_paypal",
+      },
+      fee: actualFeeAvailable
+        ? { amount: fee!.abs().toString(), currency: transaction.feeCurrency, source: "actual_paypal" }
+        : { amount: null, currency: transaction.feeCurrency ?? null, source: "unavailable" },
+      reportedNet: reportedNet && transaction.paypalReportedNetCurrency
+        ? { amount: transaction.paypalReportedNetAmount, currency: transaction.paypalReportedNetCurrency, source: "actual_paypal" }
+        : { amount: null, currency: null, source: "unavailable" },
+      calculatedNet: calculatedNet
+        ? { ...calculatedNet, source: "payleak_calculation" }
+        : { amount: null, currency: null, source: "unavailable" },
+      netVerification: transaction.netVerificationStatus
+        ? {
+          status: transaction.netVerificationStatus,
+          difference: transaction.netVerificationDifference ?? null,
+          source: "payleak_calculation",
+        }
+        : { status: "NOT_AVAILABLE", difference: null, source: "unavailable" },
+      conversion,
+    };
+  });
 
   return {
     type,
+    sourceEnvironment: env.PAYPAL_MODE,
     totals: {
       clients: clients.length,
       clientsWithTransactions,
@@ -580,6 +645,7 @@ export function accountFinancialEvidence(
       period: summary.period,
     })),
     transactionIds: transactions.map((transaction) => transaction.paypalTransactionId),
+    recentTransactions,
     period: period ? { start: period.start?.toISOString() ?? null, end: period.end?.toISOString() ?? null } : null,
     projectData: { projectsAvailable: false, projectExpensesAvailable: false, netProfit: "NOT_DETERMINED" },
     reportingRules: "Account totals are calculated once from deduplicated owner-scoped transaction records; currencies remain separate and client rankings use only safely associated records.",
@@ -600,7 +666,10 @@ export function accountFinancialEvidence(
 
 export function deterministicRankingAnswer(
   question: string,
-  evidence: { rankings: ReturnType<typeof rankClients> },
+  evidence: {
+    rankings: ReturnType<typeof rankClients>;
+    totals?: { clients?: number; clientsWithTransactions?: number; transactions?: number; unlinkedTransactions?: number };
+  },
 ) {
   const asksProfit = /\b(?:net\s+profit|profitability|most\s+profitable|highest\s+profit)\b/i.test(question);
   if (asksProfit) {
@@ -620,17 +689,26 @@ export function deterministicRankingAnswer(
     : /\b(?:outstanding|unpaid|overdue)\b/i.test(question)
       ? "byOutstandingInvoices"
       : "byRevenue";
+  const asksTransactionVolume = /\btransaction volume\b/i.test(question);
   const label = key === "byTransactionFees" ? "recorded PayPal transaction fees"
     : key === "byOutstandingInvoices" ? "outstanding invoice balances"
-      : "received gross revenue";
+      : asksTransactionVolume ? "transaction volume by gross amount" : "received gross revenue";
   const groups = evidence.rankings[key];
-  if (!groups.length) return `There are no comparable ${label} records for the selected clients.`;
+  if (!groups.length && (evidence.totals?.clientsWithTransactions === 0 || evidence.totals?.clients === 0)) {
+    return `## Executive summary\nI can't identify a client with the highest ${label} from the information included in this analysis.\n\n## Data limitations\n- A verified client-to-payment association isn't included in this analysis.\n- Project names and expenses aren't included in this analysis, so project-level volume can't be compared.`;
+  }
+  if (!groups.length) return `## Executive summary\nThere are no comparable ${label} records for the selected clients.`;
   const topFive = /\btop\s*(?:five|5)\b|\bcompare\b/i.test(question);
   const results = groups.map((group) => {
     const clients = group.clients.slice(0, topFive ? 5 : 1);
     return `${group.currency}: ${clients.map((item, index) => `${topFive ? `${index + 1}. ` : ""}${item.clientName} (${item.amount} ${group.currency})`).join("; ")}`;
   });
   return `Ranking by ${label}, compared only within each currency:\n${results.join("\n")}\nThis ranking does not establish net profit.`;
+}
+
+export function isClientRankingQuestion(question: string) {
+  const asksForRank = /\b(highest|most|top|rank|compare all|best|which client|compare (?:my )?clients)\b/i.test(question);
+  return asksForRank && /\b(?:clients?|customers?)\b/i.test(question);
 }
 
 function rankClients(
@@ -694,16 +772,17 @@ export async function answerFinancialAgent(
   contextClientId?: string,
   requestedPeriod?: DatePeriod,
   selectedClientId?: string,
+  history: ConversationMessage[] = [],
 ) {
   const period = requestedPeriod ?? periodFromQuestion(question);
   const records = await loadOwnedRecords(userId);
   const questionText = question.trim();
-  const asksForRanking = /\b(highest|most|top|rank|compare all|best|which client|compare (?:my )?clients)\b/i.test(questionText);
+  const asksForRanking = isClientRankingQuestion(questionText);
   const asksForClients = /\b(client|customer|projects?|invoices?|transactions?|profit|revenue|income|fees|outstanding|overdue|financial)\b/i.test(questionText);
-  const asksForNamedComparison = /\bcompare\b/i.test(questionText) && explicitComparisonNames(questionText);
   const referential = /\b(he|she|his|her|that client|this client|that project|his project|her project|last project|their)\b/i.test(questionText);
   const reportFollowUp = /\b(?:the|that|this)\s+report\b|\bgenerate (?:a |the )?(?:pdf )?report\b/i.test(questionText);
   const explicitMatches = findClientCandidates(records.clients, questionText);
+  const asksForNamedComparison = explicitComparisonNames(questionText, explicitMatches.length);
   let targetClient: ClientRecord | undefined;
   if (selectedClientId) {
     targetClient = records.clients.find((client) => String(client._id) === selectedClientId);
@@ -754,7 +833,20 @@ export async function answerFinancialAgent(
         summary: evidence,
       };
     }
-    const answer = await generateFinancialAgentAnswer(questionText, [], evidence);
+    const aiEvidence = {
+      source: "authenticated_mongodb_records",
+      environment: env.PAYPAL_MODE,
+      type: evidence.type,
+      amounts: evidence.amounts,
+      recentTransactions: evidence.recentTransactions,
+      period: evidence.period,
+      limitations: [
+        "Customer names and email addresses are omitted from this account-wide analysis for privacy.",
+        "Verified project-to-payment associations and project expenses are not included in this account-wide analysis.",
+      ],
+      reportingRules: evidence.reportingRules,
+    };
+    const answer = await generateFinancialAgentAnswer(questionText, history, aiEvidence);
     return { answer, source: "backend_calculated_client_records", ambiguousClients: [], reportClientId: null, summary: evidence };
   }
 
@@ -771,7 +863,7 @@ export async function answerFinancialAgent(
   if (asksForNamedComparison) {
     const clientSummaries = explicitMatches.map((client) => calculateClientFinancialSummary(client, records.transactions, records.invoices, period, records.clients));
     const evidence = businessEvidence(clientSummaries, "selected_client_comparison");
-    const answer = await generateFinancialAgentAnswer(questionText, [], evidence);
+    const answer = await generateFinancialAgentAnswer(questionText, history, evidence);
     return { answer, source: "backend_calculated_client_records", ambiguousClients: [], reportClientId: null, summary: evidence };
   }
 
@@ -796,7 +888,7 @@ export async function answerFinancialAgent(
   const resolvedQuestion = targetClient && (referential || reportFollowUp)
     ? `${questionText}\nContext: This question refers to the registered client ${targetClient.name}.`
     : questionText;
-  const answer = await generateFinancialAgentAnswer(resolvedQuestion, [], evidence);
+  const answer = await generateFinancialAgentAnswer(resolvedQuestion, history, evidence);
   return {
     answer,
     source: "backend_calculated_client_records",
@@ -806,8 +898,8 @@ export async function answerFinancialAgent(
   };
 }
 
-function explicitComparisonNames(question: string) {
-  return /\bcompare\s+.+\s+(?:and|with|to|versus|vs\.?)\s+.+/i.test(question);
+export function explicitComparisonNames(question: string, matchingClients: number) {
+  return matchingClients > 1 && /\bcompare\s+.+\s+(?:and|with|to|versus|vs\.?)\s+.+/i.test(question);
 }
 
 function moneyText(items: { currency: string; amount: string }[] | null) {

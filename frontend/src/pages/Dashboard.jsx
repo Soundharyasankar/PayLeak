@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Activity, ArrowRight, CircleDollarSign, FilePlus2, RefreshCw, Wallet } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Activity, ArrowRight, CircleDollarSign, FilePlus2, Wallet } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import toast from "react-hot-toast";
 import PageHeader from "../components/PageHeader.jsx";
 import StatCard from "../components/StatCard.jsx";
 import Panel from "../components/Panel.jsx";
@@ -10,7 +9,6 @@ import StatusBadge from "../components/StatusBadge.jsx";
 import { useAppData } from "../context/AppContext.jsx";
 import { getInvoiceTotals, money } from "../utils/formatters.js";
 import { useAuth } from "../context/AuthContext.jsx";
-import { getDefaultPaypalSyncRange } from "../services/transactionService.js";
 
 function currencySummary(items, valueKey) {
   if (!items.length) return "No records";
@@ -18,11 +16,9 @@ function currencySummary(items, valueKey) {
 }
 
 export default function Dashboard() {
-  const { transactions, invoices, analytics, syncTransactions } = useAppData();
-  const { paypal, refreshPaypalAccount } = useAuth();
-  const navigate = useNavigate();
+  const { transactions, invoices, analytics } = useAppData();
+  const { paypal } = useAuth();
   const [currency, setCurrency] = useState("");
-  const [syncing, setSyncing] = useState(false);
   const currencies = analytics?.currencies ?? [];
   const selectedCurrency = currency || currencies[0]?.currency || "";
   const monthlyCounts = useMemo(() => {
@@ -38,27 +34,9 @@ export default function Dashboard() {
   const unavailableConversions = analytics?.conversions?.unavailableCount ?? 0;
   const actualFees = analytics?.feesByCurrency ?? [];
 
-  const syncPaypal = async () => {
-    if (!paypal?.canSync) {
-      navigate("/connect-paypal");
-      return;
-    }
-    setSyncing(true);
-    try {
-      const { startDate, endDate } = getDefaultPaypalSyncRange();
-      const result = await syncTransactions(startDate, endDate);
-      await refreshPaypalAccount();
-      toast.success(`PayPal returned ${result.paypalTotalRecordsRetrieved}; ${result.totalRecordsInserted} new, ${result.existingRecordsUpdated} refreshed. ${result.totalRecordsStoredInMongoDB} stored in PayLeak.`);
-    } catch (error) {
-      toast.error(error.response?.data?.error?.message || error.message || "Could not sync PayPal transactions.");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   return (
     <div className="page-enter">
-      <PageHeader eyebrow="OVERVIEW" title="Financial Overview" description="Review PayPal transaction records and actual fees available for your account." action={<div className="dashboard-header-actions"><span className={`paypal-dashboard-status ${paypal?.connected ? "connected" : ""}`} role="status"><i />{paypal?.connected ? `PayPal ${paypal.environment === "sandbox" ? "Sandbox " : ""}Connected` : paypal ? "PayPal not connected" : "PayPal status unavailable"}</span><button className="button secondary" onClick={syncPaypal} disabled={syncing}>{syncing ? <span className="spinner" /> : <RefreshCw size={16} />} Sync PayPal</button><Link className="button primary" to="/invoices/create"><FilePlus2 size={17} /> Create invoice</Link></div>} />
+      <PageHeader eyebrow="OVERVIEW" title="Financial Overview" description="Review PayPal transaction records and actual fees available for your account." action={<div className="dashboard-header-actions"><span className={`paypal-dashboard-status ${paypal?.connected ? "connected" : ""}`} role="status"><i />{paypal?.connected ? `PayPal ${paypal.environment === "sandbox" ? "Sandbox " : ""}Connected` : paypal ? "PayPal not connected" : "PayPal status unavailable"}</span><Link className="button primary" to="/invoices/create"><FilePlus2 size={17} /> Create invoice</Link></div>} />
       <div className="stats-grid four">
         <StatCard label="Transactions" value={analytics?.transactionCount ?? transactions.length} note="Records stored for your account" icon={Activity} tone="purple" />
         <StatCard label="Gross volume" value={currencySummary(currencies, "totalGross")} note="Kept separate by currency" icon={Wallet} tone="blue" />

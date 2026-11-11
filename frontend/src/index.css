@@ -447,6 +447,62 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .analysis-fact-list > div:last-child { border-bottom: 0; }
 .analysis-fact-list > div > span:first-child { color: #858b9d; }
 .analysis-fact-list b { color: #3e4356; font-weight: 600; overflow-wrap: anywhere; }
+.paypal-leak-calculator { display: grid; gap: 14px; margin-bottom: 27px; }
+.leak-input-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
+.leak-input-grid .field-label { min-width: 0; font-size: 10px; }
+.leak-input-grid input, .leak-input-grid select { width: 100%; min-height: 39px; padding: 0 10px; border: 1px solid #e8eaf0; border-radius: 7px; color: #454b5e; background: white; font-size: 11px; }
+.leak-input-grid input:disabled, .leak-input-grid select:disabled { color: #9095a3; background: #f5f6f8; }
+.leak-gst-toggle { display: flex; align-items: center; gap: 9px; color: #555b6d; font-size: 10px; font-weight: 600; }
+.leak-gst-toggle input { width: 16px; height: 16px; min-height: 0; accent-color: #7658f6; }
+.leak-estimate-note { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0 0; color: #858b9d; font-size: 9px; line-height: 1.55; }
+.leak-estimate-note svg { flex: 0 0 auto; color: #826dd7; }
+.leak-input-error { margin: 10px 0 0; color: #bd514a; font-size: 10px; }
+.leak-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.leak-summary-card { display: grid; min-height: 116px; align-content: center; gap: 7px; padding: 15px; border: 1px solid #eceef4; border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+.leak-summary-card > span { color: #858b9d; font-size: 10px; }
+.leak-summary-card strong { color: #353a4e; font-family: Manrope, sans-serif; font-size: clamp(17px, 2vw, 23px); letter-spacing: -.5px; overflow-wrap: anywhere; }
+.leak-summary-card small { color: #969baa; font-size: 9px; }
+.leak-summary-card.received strong, .leak-received { color: #17865f; }
+.leak-summary-card.lost strong, .leak-amount { color: #c4514b; }
+.leak-steps-table { min-width: 940px; }
+.leak-steps-table td { vertical-align: top; }
+.leak-steps-table code { color: #6d5aa9; font-family: "DM Sans", sans-serif; font-size: 9px; white-space: normal; }
+.leak-step-number { display: inline-grid; width: 22px; height: 22px; place-items: center; border-radius: 7px; color: #6852ce; background: #f0edff; font-size: 9px; font-weight: 700; }
+.leak-analysis-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 14px; }
+.leak-stacked-bar { display: flex; height: 13px; overflow: hidden; margin: 10px 0 16px; border-radius: 99px; background: #eff0f4; }
+.leak-stacked-bar > span { min-width: 0; transition: width .2s ease; }
+.leak-stacked-bar .fees { background: #e87969; }
+.leak-stacked-bar .gst { background: #e8b451; }
+.leak-stacked-bar .spread { background: #8171db; }
+.leak-breakdown-table { display: grid; }
+.leak-breakdown-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 9px; min-height: 40px; border-bottom: 1px solid #f0f1f5; font-size: 10px; }
+.leak-breakdown-row > span { display: flex; align-items: center; gap: 7px; color: #62677a; }
+.leak-breakdown-row > span i { width: 8px; height: 8px; border-radius: 50%; background: #e87969; }
+.leak-breakdown-row.gst > span i { background: #e8b451; }
+.leak-breakdown-row.spread > span i { background: #8171db; }
+.leak-breakdown-row > b { color: #bd514a; font-size: 10px; }
+.leak-breakdown-row > small { color: #898fa0; font-size: 9px; }
+.leak-breakdown-row > em { grid-column: 1 / -1; margin: -4px 0 7px 15px; color: #8171db; font-size: 8px; font-style: normal; }
+.leak-verification { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-size: 9px; font-weight: 700; }
+.leak-verification.matched { color: #16835f; }
+.leak-verification.warning { color: #a96828; }
+.leak-rate-comparison, .leak-reality-grid, .leak-worked-example { display: grid; gap: 0; }
+.leak-rate-comparison > div, .leak-reality-grid > div, .leak-worked-example > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 39px; border-bottom: 1px solid #f0f1f5; }
+.leak-rate-comparison > div > span, .leak-reality-grid > div > span, .leak-worked-example > div > span { color: #858b9d; font-size: 9px; }
+.leak-rate-comparison b, .leak-reality-grid b, .leak-worked-example b { color: #464b5e; font-size: 10px; text-align: right; }
+.leak-disclaimer { display: block; margin: 11px 0 0; color: #8e93a1; font-size: 8px; line-height: 1.55; }
+.leak-reality-message { margin: 12px 0 0; padding: 10px 12px; border-radius: 7px; color: #7354b8; background: #f5f2ff; font-size: 10px; font-weight: 700; }
+.leak-explainer { padding: 16px 18px; border: 1px solid #eceef4; border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+.leak-explainer summary { color: #383d51; cursor: pointer; font-size: 12px; font-weight: 700; }
+.leak-explainer ol { display: grid; gap: 10px; margin: 15px 0 0; padding-left: 20px; color: #62677a; font-size: 10px; line-height: 1.65; }
+.leak-explainer li::marker { color: #7960e5; font-weight: 700; }
+.third-party-label { color: #8f6b36; font-size: 9px; font-weight: 600; }
+.leak-scenario-table { min-width: 570px; }
+.leak-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 2px 3px; border-top: 1px solid #e9ebf1; }
+.leak-sources b { color: #545a6c; font-size: 9px; }
+.leak-sources a { color: #6b55d3; font-size: 9px; text-decoration: underline; text-underline-offset: 2px; }
+.leak-sources p { flex-basis: 100%; margin: 0; color: #9095a3; font-size: 8px; line-height: 1.5; }
+.transaction-analysis-heading { margin-top: 30px; padding-top: 23px; border-top: 1px solid #e9ebf1; }
 .analysis-source-note { display: block; margin-top: 4px; color: #9297a7; font-size: 8px; font-weight: 400; line-height: 1.4; }
 .analysis-badge { display: inline-flex; align-items: center; width: max-content; max-width: 100%; padding: 4px 7px; border-radius: 99px; font-size: 8px; font-weight: 700; white-space: nowrap; }
 .analysis-badge.verified { color: #16835f; background: #eaf8f2; }
@@ -514,6 +570,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .history-context { display: grid; gap: 6px; padding: 10px; border: 1px solid #eff0f5; border-radius: 8px; background: white; }
 .history-context b { color: #52586a; font-size: 9px; }
 .history-context small { color: #969baa; font-size: 8px; }
+.history-payments { display: grid; max-height: 240px; gap: 8px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.history-payments li { display: grid; gap: 3px; padding-top: 7px; border-top: 1px solid #f0f1f5; overflow-wrap: anywhere; }
+.history-payments li strong { color: #52586a; font-size: 8px; font-weight: 600; }
 .history-disclaimer { display: flex; gap: 6px; margin-top: auto; padding: 9px 5px 0; color: #918aaf; font-size: 8px; line-height: 1.5; }
 .history-disclaimer svg { flex: 0 0 auto; color: #8974e8; }
 .chat-panel { display: flex; min-height: 510px; flex-direction: column; }
@@ -532,6 +591,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .message-avatar.user { color: #fff; background: #d88976; }
 .message-content { max-width: min(82%, 580px); }
 .message-bubble { padding: 10px 12px; border: 1px solid #eff0f5; border-radius: 4px 10px 10px; color: #555b6e; background: #fbfbfd; font-size: 10px; line-height: 1.65; }
+.message-markdown { overflow-wrap: anywhere; }
+.message-markdown > :first-child { margin-top: 0; }
+.message-markdown > :last-child { margin-bottom: 0; }
+.message-markdown h2, .message-markdown h3, .message-markdown h4 { margin: 11px 0 5px; color: #33384a; font-size: 11px; font-weight: 700; }
+.message-markdown p { margin: 6px 0; }
+.message-markdown ul, .message-markdown ol { margin: 5px 0 8px; padding-left: 18px; }
+.message-markdown li { margin: 3px 0; }
+.message-markdown strong { color: #363b4d; }
+.message-markdown code { padding: 1px 3px; border-radius: 3px; background: #f0eff5; }
+.message-table-scroll { max-width: 100%; margin: 8px 0; overflow-x: auto; }
+.message-table-scroll table { width: 100%; border-collapse: collapse; }
+.message-table-scroll th, .message-table-scroll td { min-width: 72px; padding: 5px 7px; border: 1px solid #ecebf2; text-align: left; vertical-align: top; }
+.message-table-scroll th { color: #42475a; background: #f5f4fa; font-weight: 700; }
 .chat-message.user .message-bubble { border-color: #e6e1ff; border-radius: 10px 4px 10px 10px; color: #55489b; background: #f6f4ff; }
 .message-source { display: block; margin: 5px 2px 0; color: #a09bae; font-size: 8px; }
 .typing-bubble { display: flex; gap: 4px; padding: 12px; border-radius: 4px 10px 10px; background: #f4f2fc; }
@@ -685,6 +757,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .topbar-actions { gap: 11px; margin-left: auto; }
   .dashboard-chart-grid { grid-template-columns: minmax(0, 1.35fr) minmax(250px, .9fr); }
   .dashboard-lower-grid { grid-template-columns: 1fr; }
+  .leak-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .leak-input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .leak-analysis-grid { grid-template-columns: 1fr; }
   .insights-stack { grid-template-columns: 1.2fr .8fr; align-items: start; }
   .analysis-grid { grid-template-columns: 1fr; }
   .notifications-grid { grid-template-columns: 1fr; }
@@ -710,6 +785,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .page-heading p { max-width: 320px; font-size: 10px; line-height: 1.5; }
   .page-heading-action { align-self: center; }
   .page-heading-action .button { min-height: 34px; gap: 5px; padding: 0 8px; font-size: 9px; white-space: nowrap; }
+  .leak-summary-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
+  .leak-summary-card { min-height: 96px; padding: 10px; }
+  .leak-summary-card > span { font-size: 8px; }
+  .leak-summary-card strong { font-size: 16px; }
+  .leak-summary-card small { font-size: 8px; }
+  .leak-input-grid { grid-template-columns: 1fr; gap: 10px; }
+  .leak-explainer { padding: 13px; }
+  .leak-breakdown-row { grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+  .leak-breakdown-row > small { grid-column: 2; text-align: right; }
+  .leak-breakdown-row > em { grid-column: 1 / -1; margin-left: 0; }
+  .leak-rate-comparison > div, .leak-reality-grid > div, .leak-worked-example > div { align-items: flex-start; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 0; }
   .dashboard-header-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .dashboard-header-actions .paypal-dashboard-status { flex: 1 0 100%; justify-content: center; }
   .stats-grid.four { grid-template-columns: 1fr 1fr; gap: 8px; }

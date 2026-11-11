@@ -58,15 +58,8 @@ export async function getPaypalAccount(userId: string) {
       });
   return {
     connected: applicationCredentialsConfigured && Boolean(capabilities.transactionSearch || capabilities.invoicing),
-    connectionType: "shared_application_credentials",
-    scope: "shared",
-    email: integration.accountEmailVerified ? integration.accountEmail : null,
     environment,
-    applicationCredentialsConfigured,
     canSync: applicationCredentialsConfigured && Boolean(capabilities.transactionSearch),
-    capabilities,
-    lastSyncedAt: integration.lastSyncedAt,
-    lastInvoiceSyncedAt: integration.lastInvoiceSyncedAt,
   };
 }
 

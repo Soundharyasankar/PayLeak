@@ -44,6 +44,7 @@ aiRoutes.post("/financial-agent", financialAgentLimit, validateBody(financialAge
     req.body.contextClientId,
     getDatePeriod(req.body.periodStart, req.body.periodEnd),
     req.body.selectedClientId,
+    req.body.history ?? [],
   ))));
 aiRoutes.post("/reports/client", financialAgentLimit, validateBody(clientReportBody), asyncHandler(async (req, res) =>
   success(res, await createClientFinancialReport(

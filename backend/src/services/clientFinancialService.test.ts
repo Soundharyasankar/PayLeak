@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Types } from "mongoose";
 import { AppError } from "../utils/errors.js";
-import { accountFinancialEvidence, buildClientReportPdf, businessEvidence, calculateClientFinancialSummary, deterministicRankingAnswer, findClientCandidates, retrieveOwnedFinancialRecords, shouldUseAccountWideSummary } from "./clientFinancialService.js";
+import { accountFinancialEvidence, buildClientReportPdf, businessEvidence, calculateClientFinancialSummary, deterministicRankingAnswer, explicitComparisonNames, findClientCandidates, isClientRankingQuestion, retrieveOwnedFinancialRecords, shouldUseAccountWideSummary } from "./clientFinancialService.js";
 import { ownedTransactionFilter } from "./transactionService.js";
 
 const client = {
@@ -147,6 +147,12 @@ test("reconciles an unlinked completed PayPal row to a uniquely named client wit
     feeAmount: "-23.36",
     feeCurrency: "USD",
     feeSource: "actual_paypal",
+    paypalReportedNetAmount: "476.64",
+    paypalReportedNetCurrency: "USD",
+    payleakCalculatedNetAmount: "476.64",
+    payleakCalculatedNetCurrency: "USD",
+    netVerificationStatus: "MATCH",
+    netVerificationDifference: "0.00",
     transactionDate: new Date("2026-11-07T10:00:00.000Z"),
     rawPaypal: { payer_info: { payer_name: { alternate_full_name: "John Doe" } } },
   };
@@ -314,6 +320,12 @@ test("builds account-wide totals directly from deduplicated transactions and mat
     feeAmount: "-23.36",
     feeCurrency: "USD",
     feeSource: "actual_paypal",
+    paypalReportedNetAmount: "476.64",
+    paypalReportedNetCurrency: "USD",
+    payleakCalculatedNetAmount: "476.64",
+    payleakCalculatedNetCurrency: "USD",
+    netVerificationStatus: "MATCH",
+    netVerificationDifference: "0.00",
     transactionDate: new Date("2026-11-07T10:00:00.000Z"),
     rawPaypal: { payer_info: { payer_name: { alternate_full_name: "John Doe" } } },
   };
@@ -337,6 +349,10 @@ test("builds account-wide totals directly from deduplicated transactions and mat
     feeAmount: null,
     feeCurrency: null,
     feeSource: "unavailable",
+    paypalReportedNetAmount: null,
+    paypalReportedNetCurrency: null,
+    payleakCalculatedNetAmount: null,
+    payleakCalculatedNetCurrency: null,
   };
   const account = accountFinancialEvidence(
     [john],
@@ -369,6 +385,22 @@ test("builds account-wide totals directly from deduplicated transactions and mat
   assert.deepEqual(account.amounts.grossRevenueReceived, comparison.amounts.grossRevenueReceived);
   assert.deepEqual(account.amounts.transactionFees, comparison.amounts.transactionFees);
   assert.deepEqual(account.clients[0]?.transactionIds, ["8YU20791MA949721H", "PENDING-1", "FAILED-1", "INR-1"]);
+  assert.equal(account.recentTransactions.length, 4);
+  assert.deepEqual(account.recentTransactions[0], {
+    transactionId: "8YU20791MA949721H",
+    date: "2026-11-07T10:00:00.000Z",
+    type: "T0006",
+    status: "Completed",
+    kind: "payment_or_other",
+    gross: { amount: "500.00", currency: "USD", source: "actual_paypal" },
+    fee: { amount: "23.36", currency: "USD", source: "actual_paypal" },
+    reportedNet: { amount: "476.64", currency: "USD", source: "actual_paypal" },
+    calculatedNet: { amount: "476.64", currency: "USD", source: "payleak_calculation" },
+    netVerification: { status: "MATCH", difference: "0.00", source: "payleak_calculation" },
+    conversion: { source: "unavailable" },
+  });
+  assert.equal(account.recentTransactions[3]?.fee.source, "unavailable");
+  assert.equal(JSON.stringify(account.recentTransactions).includes("John Doe"), false);
   assert.equal(account.amounts.netProfit, null);
   assert.equal(account.projectData.netProfit, "NOT_DETERMINED");
 });
@@ -393,6 +425,32 @@ test("account totals include owner transactions even when no clients can be asso
   assert.deepEqual(evidence.amounts.grossRevenueReceived, [{ currency: "USD", amount: "500.00" }]);
   assert.deepEqual(evidence.amounts.transactionFees, [{ currency: "USD", amount: "23.36" }]);
   assert.deepEqual(evidence.amounts.amountAfterRecordedTransactionFees, [{ currency: "USD", amount: "476.64" }]);
+});
+
+test("derives same-currency net from actual fees when PayLeak has not stored the calculation", () => {
+  const transaction = {
+    clientId: client._id,
+    paypalTransactionId: "NET-TEST-1",
+    transactionType: "T0006",
+    status: "S",
+    grossAmount: "100.00",
+    grossCurrency: "USD",
+    feeAmount: "-3.00",
+    feeCurrency: "USD",
+    feeSource: "actual_paypal",
+    payleakCalculatedNetAmount: null,
+    payleakCalculatedNetCurrency: null,
+    transactionDate: new Date("2026-11-07T10:00:00.000Z"),
+    rawPaypal: {},
+  };
+  const account = accountFinancialEvidence([], [transaction], [], "business_summary");
+  const clientSummary = calculateClientFinancialSummary(client, [transaction], []);
+  assert.deepEqual(account.recentTransactions[0]?.calculatedNet, {
+    amount: "97.00",
+    currency: "USD",
+    source: "payleak_calculation",
+  });
+  assert.deepEqual(clientSummary.transactions[0]?.calculatedNet, { amount: "97.00", currency: "USD" });
 });
 
 test("routes account summaries, client analysis, rankings, and fee totals by intent", () => {
@@ -466,6 +524,34 @@ test("ranks recorded amounts only within currency and refuses to assert net-prof
   assert.deepEqual(evidence.rankings.byRevenue[0]?.clients[0], { clientName: "John Smith", amount: "100.00" });
   assert.match(deterministicRankingAnswer("Which client received the most revenue?", evidence), /John Smith \(100\.00 USD\)/);
   assert.match(deterministicRankingAnswer("Which client had the highest net profit?", evidence), /can't identify the highest net-profit client/);
+});
+
+test("discloses missing client links instead of inventing a top-volume client", () => {
+  const answer = deterministicRankingAnswer("Which client has generated the highest transaction volume?", {
+    rankings: {
+      netProfit: { status: "NOT_DETERMINED", explanation: "Project expenses are unavailable." },
+      byRevenue: [],
+      byTransactionFees: [],
+      byOutstandingInvoices: [],
+      byProjectCount: { status: "NOT_AVAILABLE", explanation: "Projects are not tracked." },
+    },
+    totals: { clients: 0, clientsWithTransactions: 0, transactions: 7, unlinkedTransactions: 7 },
+  });
+  assert.match(answer, /can't identify a client/);
+  assert.match(answer, /transaction volume by gross amount/);
+  assert.match(answer, /information included in this analysis/);
+  assert.doesNotMatch(answer, /7 PayPal transactions|clients: 0|projectsAvailable/);
+});
+
+test("reserves deterministic client rankings for client-ranking questions", () => {
+  assert.equal(isClientRankingQuestion("Which client has generated the highest transaction volume?"), true);
+  assert.equal(isClientRankingQuestion("Which transactions have the highest PayPal fees?"), false);
+  assert.equal(isClientRankingQuestion("Compare my top clients by recorded revenue."), true);
+});
+
+test("requires multiple matched clients before routing a named client comparison", () => {
+  assert.equal(explicitComparisonNames("Compare my gross amount, PayPal fees, and net received amount.", 0), false);
+  assert.equal(explicitComparisonNames("Compare John Smith and Jane Doe.", 2), true);
 });
 
 test("generates a real multi-page PDF and labels missing project profitability data", async () => {
