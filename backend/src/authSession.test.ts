@@ -22,12 +22,20 @@ test("login cookie authenticates protected dashboard API requests", async (conte
     import("./middleware/errorMiddleware.ts"),
   ]);
   const password = "test-login-password";
-  const user = {
-    _id: "507f1f77bcf86cd799439011",
-    email: "session-test@example.com",
-    name: "Session Test",
-    passwordHash: await bcrypt.hash(password, 4),
-  };
+  const users = [
+    {
+      _id: "507f1f77bcf86cd799439011",
+      email: "session-test@example.com",
+      name: "Session Test",
+      passwordHash: await bcrypt.hash(password, 4),
+    },
+    {
+      _id: "507f1f77bcf86cd799439012",
+      email: "second-session-test@example.com",
+      name: "Second Session Test",
+      passwordHash: await bcrypt.hash(password, 4),
+    },
+  ];
   const emptyQuery = () => ({
     select() { return this; },
     sort() { return this; },
@@ -36,8 +44,15 @@ test("login cookie authenticates protected dashboard API requests", async (conte
     lean: async () => [],
   });
 
-  context.mock.method(User, "findOne", (() => ({
-    select: async () => user,
+  context.mock.method(User, "findOne", ((query: { email: string }) => ({
+    select: async () => users.find((user) => user.email === query.email),
+  })) as Function, {});
+  context.mock.method(User, "findById", ((id: string) => ({
+    select() { return this; },
+    lean: async () => {
+      const user = users.find((candidate) => candidate._id === String(id));
+      return user ? { _id: user._id, name: user.name, email: user.email } : null;
+    },
   })) as Function, {});
   context.mock.method(Transaction, "find", (() => emptyQuery()) as Function, {});
   context.mock.method(Transaction, "aggregate", (async () => []) as Function, {});
@@ -63,24 +78,38 @@ test("login cookie authenticates protected dashboard API requests", async (conte
   assert.ok(address && typeof address !== "string");
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
-  const login = await fetch(`${baseUrl}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: user.email, password }),
-  });
-  assert.equal(login.status, 200);
-  assert.deepEqual(await login.json(), {
-    success: true,
-    data: { user: { id: user._id, name: user.name, email: user.email } },
-  });
+  const cookies: string[] = [];
+  for (const user of users) {
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: user.email, password }),
+    });
+    assert.equal(login.status, 200);
+    assert.deepEqual(await login.json(), {
+      success: true,
+      data: { user: { id: user._id, name: user.name, email: user.email } },
+    });
 
-  const setCookie = login.headers.get("set-cookie") ?? "";
-  assert.match(setCookie, /payleak_access=/);
-  assert.match(setCookie, /HttpOnly/i);
-  assert.match(setCookie, /SameSite=None/i);
-  assert.match(setCookie, /Secure/i);
-  const cookie = setCookie.split(";")[0];
-  assert.ok(cookie);
+    const setCookie = login.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, /payleak_access=/);
+    assert.match(setCookie, /HttpOnly/i);
+    assert.match(setCookie, /SameSite=None/i);
+    assert.match(setCookie, /Secure/i);
+    const cookie = setCookie.split(";")[0];
+    assert.ok(cookie);
+    cookies.push(cookie);
+
+    const currentUser = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(currentUser.status, 200);
+    assert.deepEqual((await currentUser.json() as { data: unknown }).data, {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+    });
+  }
 
   const protectedRequests = [
     { path: "/api/analytics", query: "", label: "analytics" },
@@ -100,10 +129,12 @@ test("login cookie authenticates protected dashboard API requests", async (conte
     assert.equal(invalidToken.status, 401, `${request.label} must reject invalid authentication`);
     assert.equal((await invalidToken.json() as { error: { code: string } }).error.code, "INVALID_TOKEN");
 
-    const authenticated: Response = await fetch(`${baseUrl}${request.path}${request.query}`, {
-      headers: { Cookie: cookie },
-    });
-    assert.equal(authenticated.status, 200, `${request.label} must accept the login session cookie`);
-    assert.equal((await authenticated.json() as { success: boolean }).success, true);
+    for (const cookie of cookies) {
+      const authenticated: Response = await fetch(`${baseUrl}${request.path}${request.query}`, {
+        headers: { Cookie: cookie },
+      });
+      assert.equal(authenticated.status, 200, `${request.label} must accept an independent login session`);
+      assert.equal((await authenticated.json() as { success: boolean }).success, true);
+    }
   }
 });

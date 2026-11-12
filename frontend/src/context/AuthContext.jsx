@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, endpoints, responseData } from "../services/api.js";
 import { claimPaypalWelcome } from "../utils/paypalWelcome.js";
+import { shouldClearAuthSession, verifySessionUser } from "../utils/authSession.js";
 
 const AuthContext = createContext(null);
 
@@ -23,6 +24,20 @@ export function AuthProvider({ children }) {
       setPaypalError(error.response?.data?.error?.message || "Could not load PayPal account status.");
       return null;
     }
+  }, []);
+
+  useEffect(() => {
+    const interceptorId = api.interceptors.response.use(undefined, (error) => {
+      if (shouldClearAuthSession(error)) {
+        setUser(null);
+        setPaypal(null);
+        setPaypalWelcomePending(false);
+        setPaypalError("");
+        setStatus("anonymous");
+      }
+      return Promise.reject(error);
+    });
+    return () => api.interceptors.response.eject(interceptorId);
   }, []);
 
   useEffect(() => {
@@ -58,20 +73,24 @@ export function AuthProvider({ children }) {
     const response = await api.post(endpoints.login, credentials);
     const data = responseData(response);
     const account = await refreshPaypalAccount();
-    setPaypalWelcomePending(claimPaypalWelcome(data.user, Boolean(account?.connected)));
-    setUser(data.user);
+    const sessionUser = await verifySessionUser(data.user, async () =>
+      responseData(await api.get(endpoints.currentUser)));
+    setPaypalWelcomePending(claimPaypalWelcome(sessionUser, Boolean(account?.connected)));
+    setUser(sessionUser);
     setStatus("authenticated");
-    return data.user;
+    return sessionUser;
   }, [refreshPaypalAccount]);
 
   const register = useCallback(async (details) => {
     const response = await api.post(endpoints.register, details);
     const data = responseData(response);
     const account = await refreshPaypalAccount();
-    setPaypalWelcomePending(claimPaypalWelcome(data.user, Boolean(account?.connected)));
-    setUser(data.user);
+    const sessionUser = await verifySessionUser(data.user, async () =>
+      responseData(await api.get(endpoints.currentUser)));
+    setPaypalWelcomePending(claimPaypalWelcome(sessionUser, Boolean(account?.connected)));
+    setUser(sessionUser);
     setStatus("authenticated");
-    return data.user;
+    return sessionUser;
   }, [refreshPaypalAccount]);
 
   const updateProfile = useCallback(async (profile) => {
@@ -82,15 +101,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
-    try {
-      await api.post(endpoints.logout);
-    } finally {
-      setUser(null);
-      setPaypal(null);
-      setPaypalWelcomePending(false);
-      setPaypalError("");
-      setStatus("anonymous");
-    }
+    await api.post(endpoints.logout);
+    setUser(null);
+    setPaypal(null);
+    setPaypalWelcomePending(false);
+    setPaypalError("");
+    setStatus("anonymous");
   }, []);
 
   const finishPaypalWelcome = useCallback(() => setPaypalWelcomePending(false), []);

@@ -42,7 +42,13 @@ export function AppProvider({ children }) {
       setAnalytics(nextAnalytics);
     } catch (requestError) {
       console.error("Could not load PayLeak account data.", requestError);
-      setError(requestError.response?.data?.error?.message || requestError.message || "Could not load account data.");
+      const status = requestError.response?.status;
+      const message = status === 401
+        ? "Your session is missing or expired. Please sign in again."
+        : status === 403
+          ? "You do not have permission to access this account data."
+          : requestError.response?.data?.error?.message || requestError.message || "Could not load account data.";
+      setError(message);
     } finally {
       setLoading(false);
     }

@@ -2,14 +2,17 @@
 
 :root {
   font-family: "DM Sans", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #20243a;
+  color: #263247;
   background: #f7f8fc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   font-optical-sizing: auto;
   font-weight: 400;
   --navy: #20243a;
-  --muted: #858b9d;
+  --muted: #526078;
+  --text-primary: #263247;
+  --text-secondary: #526078;
+  --text-meta: #667085;
   --purple: #7658f6;
   --purple-dark: #6546e8;
   --border: #eceef4;
@@ -887,4 +890,139 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* Readable text sizing and contrast across authenticated application pages. */
+.sidebar { color: var(--text-primary); }
+.workspace-switch small, .sidebar-connect small, .user-details small,
+.global-search input, .profile-menu button, .nav-link {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.nav-caption, .history-date { color: var(--text-meta); font-size: 11px; }
+.sidebar-connect b, .workspace-switch b, .user-details b { font-size: 14px; font-weight: 500; }
+.sandbox-pill { font-size: 12px; }
+.content-area { color: var(--text-primary); font-size: 14px; }
+.content-area p, .content-area li, .content-area dd, .content-area dt,
+.content-area input, .content-area select, .content-area textarea,
+.content-area button, .content-area summary {
+  font-size: 14px;
+}
+.content-area p { color: var(--text-secondary); font-weight: 400; }
+.content-area small, .page-heading p, .stat-foot, .table-secondary,
+.table-footnote, .agent-data-note, .notification-summary-meta,
+.notification-item time, .notification-item small {
+  color: var(--text-meta);
+  font-size: 12px;
+  font-weight: 400;
+}
+.page-heading p { font-size: 14px; }
+.panel-heading p, .insight-item small, .empty-state, .stat-top,
+.chart-legend, .breakdown-legend > div, .quick-actions a, .panel-link {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 400;
+}
+.button, .text-button, .profile-menu button, .settings-nav a,
+.compact-select, .pagination-controls, .table-search input {
+  font-size: 14px;
+}
+.button { font-weight: 600; }
+.button.small-button { font-size: 12px; }
+.field-label, .form-grid .field-label, .analysis-controls .field-label,
+.leak-input-grid .field-label, .profile-edit-fields .field-label,
+.settings-preferences .field-label {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+.field-label > input, .field-label > select, .field-label > textarea,
+.password-field input, .amount-field input, .form-grid .field-label > input,
+.form-grid .field-label > select, .form-grid .field-label > textarea,
+.analysis-controls select, .leak-input-grid input, .leak-input-grid select,
+.profile-edit-fields input, .settings-preferences select,
+.chat-input-area textarea, .ai-prompt-row textarea {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.data-table thead th { color: var(--text-meta); font-size: 12px; font-weight: 500; }
+.data-table tbody td, .table-primary { color: var(--text-primary); font-size: 14px; }
+.table-secondary { font-size: 12px; }
+.status-badge { font-size: 12px; font-weight: 500; }
+.stat-top { font-size: 12px; }
+.stat-foot, .table-footnote { font-size: 12px; }
+.insight-item { color: var(--text-secondary); }
+.insight-item b { color: var(--text-primary); font-size: 13px; font-weight: 500; }
+.insight-item small { font-size: 12px; }
+.message-bubble, .message-markdown { color: var(--text-primary); font-size: 14px; font-weight: 400; }
+.message-markdown h2, .message-markdown h3, .message-markdown h4 { font-size: 14px; }
+.message-markdown strong { color: var(--text-primary); }
+.chat-header > div b, .agent-summary h3 { color: var(--text-primary); font-size: 14px; font-weight: 500; }
+.chat-header > div small, .chat-input-area > small, .chat-empty p,
+.agent-summary-grid small, .agent-data-note, .agent-record-scroll th,
+.agent-record-scroll td, .agent-ranking small, .agent-ranking li,
+.settings-nav a, .profile-edit-fields input, .settings-preferences select {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.agent-summary-grid b { color: var(--text-primary); font-size: 13px; font-weight: 500; }
+.agent-record-scroll th, .agent-record-scroll td { font-size: 12px; }
+.settings-nav a { font-size: 14px; }
+.notification-content p { color: var(--text-secondary); font-size: 14px; }
+.notification-item-title b { color: var(--text-primary); font-size: 14px; font-weight: 500; }
+.notification-summary-meta { font-size: 12px !important; }
+.settings-preferences .button { font-size: 14px; }
+.modal-card p, .modal-card li { color: var(--text-secondary); font-size: 14px; font-weight: 400; }
+.modal-card small { color: var(--text-meta); font-size: 12px; }
+.muted, .check-label { color: var(--text-secondary); font-size: 13px; }
+.signup-copy, .secure-note, .login-panel-foot { color: var(--text-meta); font-size: 12px; }
+.connect-card > p, .sandbox-callout p, .paypal-success-card p { color: var(--text-secondary); font-size: 14px; }
+.sandbox-callout b, .connected-title b { color: var(--text-primary); font-size: 14px; font-weight: 500; }
+.connected-title small, .connect-privacy, .onboarding-help, .paypal-success-card small {
+  color: var(--text-meta);
+  font-size: 12px;
+}
+.connection-detail, .paypal-dashboard-status { color: var(--text-secondary); font-size: 13px; }
+.connection-detail b { color: var(--text-primary); font-weight: 500; }
+.invoice-detail-total span, .invoice-detail-grid span, .invoice-description-block > span,
+.invoice-detail-total small, .form-footer > span, .leak-estimate-note {
+  color: var(--text-meta);
+  font-size: 12px;
+}
+.invoice-detail-grid b, .analysis-fact-list b { color: var(--text-primary); font-size: 14px; font-weight: 500; }
+.analysis-fact-list > div { color: var(--text-secondary); font-size: 14px; }
+.analysis-fact-list > div > span:first-child { color: var(--text-meta); }
+.history-heading, .history-context b, .agent-ranking > b {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.history-item, .new-chat-button { font-size: 13px; font-weight: 500; }
+.history-context small, .history-payments li strong, .history-disclaimer,
+.suggested-prompts > span, .agent-ranking ol, .agent-ranking li {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.history-payments li strong { color: var(--text-primary); font-weight: 500; }
+.chat-empty p { color: var(--text-secondary); font-size: 14px; }
+.suggested-prompts > span { color: var(--text-meta); }
+.agent-ranking > b { font-size: 13px; }
+
+@media (max-width: 640px) {
+  .data-table thead th { font-size: 12px; }
+  .data-table tbody td { font-size: 13px; }
+  .settings-nav a { font-size: 13px; }
+  .notification-content p { font-size: 13px; }
+  .onboarding-top { flex-wrap: wrap; }
+  .sandbox-pill { white-space: normal; }
+  .page-heading { flex-wrap: wrap; }
+  .page-heading-action { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  .page-heading-action .button { font-size: 13px; white-space: normal; }
+  .chat-layout, .chat-panel, .chat-header, .chat-messages,
+  .suggested-prompts, .chat-input-area { min-width: 0; }
+  .chat-header { flex-wrap: wrap; }
+  .chat-header > div { min-width: 0; }
+  .chat-header > div small { flex-wrap: wrap; }
+  .chat-clear-button { max-width: 100%; white-space: normal; }
+  .chat-input-area { grid-template-columns: minmax(0, 1fr) 33px; }
 }

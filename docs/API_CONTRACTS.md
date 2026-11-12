@@ -5,6 +5,11 @@ Errors use `{ "success": false, "error": { "code": "...", "message": "..." } }`.
 Authenticated browser requests use the `payleak_access` HTTP-only JWT cookie.
 API clients may also supply a JWT in the `Authorization` header. Health,
 authentication, and PayPal webhook endpoints do not require a user session.
+The browser verifies the cookie with `GET /auth/me` after login or registration
+before marking the account authenticated. A 401 on a protected request clears
+the frontend session; a 403 keeps the session and reports insufficient access.
+The access cookie expires after eight hours; the API does not issue refresh
+tokens, so the user must sign in again after expiration.
 Monetary amounts are decimal strings. The API does not substitute estimated
 fees or rates.
 

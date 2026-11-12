@@ -17,7 +17,7 @@ export default function Login() {
     try {
       await login({ email, password });
     } catch (error) {
-      toast.error(error.response?.data?.error?.message || "Could not sign in. Check your connection and try again.");
+      toast.error(error.response?.data?.error?.message || error.message || "Could not sign in. Check your connection and try again.");
     } finally {
       setLoading(false);
     }

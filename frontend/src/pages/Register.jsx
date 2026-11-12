@@ -21,7 +21,7 @@ export default function Register() {
     try {
       await register({ name: form.name, email: form.email, password: form.password });
     } catch (error) {
-      toast.error(error.response?.data?.error?.message || "Could not create your account. Please try again.");
+      toast.error(error.response?.data?.error?.message || error.message || "Could not create your account. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -102,6 +102,25 @@ API contracts are documented in
 [`docs/API_CONTRACTS.md`](./docs/API_CONTRACTS.md). Backend startup must
 successfully connect to MongoDB before Express begins listening.
 
+## Render deployment
+
+The deployed frontend and API are separate Render services. Set
+`VITE_API_BASE_URL` on the frontend Static Site to the API's HTTPS base URL,
+including `/api` (for example, `https://payleak.onrender.com/api`). This is a
+Vite build-time variable, so changing it requires a new frontend deployment.
+Set the backend `FRONTEND_URL` to the exact public frontend origin
+(for example, `https://payleak-1.onrender.com`), and set `NODE_ENV=production`.
+The backend must use a stable `JWT_SECRET` of at least 32 characters across
+deployments; rotating it invalidates existing sessions.
+
+The frontend API client uses credentialed requests and the backend sets an
+HTTP-only, Secure, SameSite=None cookie in production. Keep CORS credential
+support enabled for the exact frontend origin; do not use a wildcard origin.
+After deployment, verify `https://<api-host>/api/health` and confirm that
+`GET /api/auth/me` returns 401 without a session. Login and registration must
+then establish a cookie that makes `/api/auth/me` return that user's profile.
+The UI only marks the user authenticated after that server check succeeds.
+
 ## Vercel multi-service deployment
 
 The root [`vercel.json`](./vercel.json) defines two services: the Vite frontend

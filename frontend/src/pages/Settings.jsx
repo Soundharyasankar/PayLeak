@@ -48,8 +48,9 @@ export default function Settings() {
   const signOut = async () => {
     try {
       await logout();
-    } catch {
-      toast.error("The server could not confirm logout.");
+    } catch (error) {
+      toast.error(error.response?.data?.error?.message || "Could not end your server session. Please try again.");
+      return;
     }
     navigate("/login", { replace: true });
   };

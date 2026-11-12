@@ -31,8 +31,7 @@ export default function AppLayout() {
       navigate("/login", { replace: true });
     } catch (requestError) {
       console.error("Could not clear the server session.", requestError);
-      toast.error("Session cleared in this page, but the server could not confirm logout.");
-      navigate("/login", { replace: true });
+      toast.error(requestError.response?.data?.error?.message || "Could not end your server session. Please try again.");
     }
   };
 
