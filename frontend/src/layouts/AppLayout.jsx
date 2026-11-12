@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Activity, Bell, Bot, ChevronDown, CircleHelp, FileText, LayoutDashboard, LogOut, Menu, ReceiptText, Search, Settings, WalletCards, X } from "lucide-react";
+import { Activity, Bell, Bot, ChevronDown, FileText, LayoutDashboard, LogOut, Menu, ReceiptText, Search, Settings, WalletCards, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useAppData } from "../context/AppContext.jsx";
 import toast from "react-hot-toast";
@@ -60,7 +60,6 @@ export default function AppLayout() {
         </div>
         <div className="sidebar-bottom">
           <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}><Settings size={18} /><span>Settings</span></NavLink>
-          <button className="nav-link" onClick={() => navigate("/settings")}><CircleHelp size={18} /><span>Help center</span></button>
           <div className="sidebar-user">
             <div className="user-avatar">{initials}</div>
             <div className="user-details"><b>{user?.name}</b><small>{user?.email}</small></div>
