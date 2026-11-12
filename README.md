@@ -113,9 +113,27 @@ Set the backend `FRONTEND_URL` to the exact public frontend origin
 The backend must use a stable `JWT_SECRET` of at least 32 characters across
 deployments; rotating it invalidates existing sessions.
 
-The frontend API client uses credentialed requests and the backend sets an
-HTTP-only, Secure, SameSite=None cookie in production. Keep CORS credential
-support enabled for the exact frontend origin; do not use a wildcard origin.
+The frontend API client uses credentialed requests and the backend sets
+an HTTP-only, Secure, SameSite=None, host-only `__Host-payleak_access` cookie
+with the `Partitioned` attribute in production. This keeps the API session
+partitioned to this frontend in browsers that block unpartitioned third-party
+cookies. A prior unpartitioned `payleak_access` cookie is cleared during
+login/registration and accepted only as a short migration fallback; new
+sessions do not issue it. Modern browsers support partitioned cookies; older
+browsers that block third-party cookies require a custom same-site domain or a
+same-origin API proxy.
+
+Keep CORS credential support enabled for the exact frontend origin; do not use
+a wildcard origin. Render sets `NODE_ENV=production` for Node services; confirm
+that the API service's `FRONTEND_URL` matches the frontend origin and that
+`VITE_API_BASE_URL` points to the API service.
+
+For session restoration on direct navigation or refresh, add this rewrite in
+the frontend Static Site's Render Dashboard under **Redirects/Rewrites**:
+`/*` → `/index.html` with action **Rewrite**. The domain root works without
+this rule, but client-side paths such as `/login` otherwise return a static
+404 on refresh.
+
 After deployment, verify `https://<api-host>/api/health` and confirm that
 `GET /api/auth/me` returns 401 without a session. Login and registration must
 then establish a cookie that makes `/api/auth/me` return that user's profile.

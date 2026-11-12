@@ -13,6 +13,8 @@ import { rateLimit } from "express-rate-limit";
 export const authRoutes = Router();
 const loginRegisterLimit = rateLimit({ windowMs: 15 * 60_000, limit: 15, standardHeaders: true, legacyHeaders: false, handler: rateLimitExceeded });
 const accessCookieName = "payleak_access";
+const partitionedAccessCookieName = "__Host-payleak_access";
+const isProduction = process.env.NODE_ENV === "production";
 const accessCookieSameSite = process.env.NODE_ENV === "production" ? "none" as const : "lax" as const;
 const profileBody = z.object({
   name: z.string().trim().min(1).max(120),
@@ -25,16 +27,35 @@ const accessCookieOptions = {
   path: "/",
   maxAge: 8 * 60 * 60 * 1000,
 };
+const partitionedAccessCookieOptions = {
+  ...accessCookieOptions,
+  partitioned: true,
+};
+const accessCookieClearOptions = {
+  httpOnly: true,
+  secure: accessCookieOptions.secure,
+  sameSite: accessCookieSameSite,
+  path: "/",
+};
+
+function setAccessCookies(res: import("express").Response, accessToken: string) {
+  if (isProduction) {
+    res.clearCookie(accessCookieName, accessCookieClearOptions);
+    res.cookie(partitionedAccessCookieName, accessToken, partitionedAccessCookieOptions);
+    return;
+  }
+  res.cookie(accessCookieName, accessToken, accessCookieOptions);
+}
 
 authRoutes.post("/register", loginRegisterLimit, validateBody(registerBody), asyncHandler(async (req, res) => {
   const result = await registerUser(req.body);
-  res.cookie(accessCookieName, result.accessToken, accessCookieOptions);
+  setAccessCookies(res, result.accessToken);
   return success(res, { user: result.user }, 201);
 }));
 
 authRoutes.post("/login", loginRegisterLimit, validateBody(loginBody), asyncHandler(async (req, res) => {
   const result = await loginUser(req.body);
-  res.cookie(accessCookieName, result.accessToken, accessCookieOptions);
+  setAccessCookies(res, result.accessToken);
   return success(res, { user: result.user });
 }));
 
@@ -61,11 +82,12 @@ authRoutes.put("/me", requireAuth, asyncHandler(async (req, res) => {
 }));
 
 authRoutes.post("/logout", (_req, res) => {
-  res.clearCookie(accessCookieName, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: accessCookieSameSite,
-    path: "/",
-  });
+  res.clearCookie(accessCookieName, accessCookieClearOptions);
+  if (isProduction) {
+    res.clearCookie(partitionedAccessCookieName, {
+      ...accessCookieClearOptions,
+      partitioned: true,
+    });
+  }
   return res.status(204).end();
 });

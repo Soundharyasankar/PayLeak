@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, endpoints, responseData } from "../services/api.js";
 import { claimPaypalWelcome } from "../utils/paypalWelcome.js";
-import { shouldClearAuthSession, verifySessionUser } from "../utils/authSession.js";
+import { authErrorMessage, shouldClearAuthSession, verifySessionUser } from "../utils/authSession.js";
 
 const AuthContext = createContext(null);
 
@@ -11,6 +11,7 @@ export function AuthProvider({ children }) {
   const [paypalWelcomePending, setPaypalWelcomePending] = useState(false);
   const [status, setStatus] = useState("loading");
   const [paypalError, setPaypalError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
 
   const refreshPaypalAccount = useCallback(async () => {
     try {
@@ -29,6 +30,10 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const interceptorId = api.interceptors.response.use(undefined, (error) => {
       if (shouldClearAuthSession(error)) {
+        const code = error.response?.data?.error?.code;
+        setAuthNotice(code === "INVALID_TOKEN"
+          ? "Your session expired or is no longer valid. Please sign in again."
+          : "Your session is no longer active. Please sign in again.");
         setUser(null);
         setPaypal(null);
         setPaypalWelcomePending(false);
@@ -51,8 +56,13 @@ export function AuthProvider({ children }) {
       })
       .catch((error) => {
         if (active) {
-          if (error.response?.status !== 401) {
+          if (error.response?.status === 401) {
+            if (error.response?.data?.error?.code === "INVALID_TOKEN") {
+              setAuthNotice("Your session expired or is no longer valid. Please sign in again.");
+            }
+          } else {
             console.error("Could not restore the PayLeak session.", error);
+            setAuthNotice(authErrorMessage(error, "PayLeak could not restore your session."));
           }
           setUser(null);
           setStatus("anonymous");
@@ -70,6 +80,7 @@ export function AuthProvider({ children }) {
   }, [user, refreshPaypalAccount]);
 
   const login = useCallback(async (credentials) => {
+    setAuthNotice("");
     const response = await api.post(endpoints.login, credentials);
     const data = responseData(response);
     const account = await refreshPaypalAccount();
@@ -82,6 +93,7 @@ export function AuthProvider({ children }) {
   }, [refreshPaypalAccount]);
 
   const register = useCallback(async (details) => {
+    setAuthNotice("");
     const response = await api.post(endpoints.register, details);
     const data = responseData(response);
     const account = await refreshPaypalAccount();
@@ -106,6 +118,7 @@ export function AuthProvider({ children }) {
     setPaypal(null);
     setPaypalWelcomePending(false);
     setPaypalError("");
+    setAuthNotice("");
     setStatus("anonymous");
   }, []);
 
@@ -116,6 +129,7 @@ export function AuthProvider({ children }) {
     paypal,
     paypalWelcomePending,
     paypalError,
+    authNotice,
     status,
     isAuthenticated: status === "authenticated" && Boolean(user),
     isConnected: Boolean(paypal?.connected),
@@ -125,7 +139,7 @@ export function AuthProvider({ children }) {
     updateProfile,
     refreshPaypalAccount,
     finishPaypalWelcome,
-  }), [user, paypal, paypalWelcomePending, paypalError, status, login, register, logout, updateProfile, refreshPaypalAccount, finishPaypalWelcome]);
+  }), [user, paypal, paypalWelcomePending, paypalError, authNotice, status, login, register, logout, updateProfile, refreshPaypalAccount, finishPaypalWelcome]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

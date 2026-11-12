@@ -7,14 +7,19 @@ export interface AuthenticatedRequest extends Request {
   auth: { userId: string; email: string };
 }
 
+function getCookieValue(cookieHeader: string | undefined, name: string) {
+  return cookieHeader?.split(";").map((item) => item.trim())
+    .find((item) => item.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+}
+
 function getAccessToken(req: Request) {
   const authorization = req.header("authorization");
   if (authorization?.startsWith("Bearer ")) return authorization.slice(7);
 
   const cookieHeader = req.header("cookie");
-  const cookie = cookieHeader?.split(";").map((item) => item.trim())
-    .find((item) => item.startsWith("payleak_access="));
-  return cookie?.slice("payleak_access=".length);
+  return getCookieValue(cookieHeader, "__Host-payleak_access")
+    || getCookieValue(cookieHeader, "payleak_access");
 }
 
 export function requireAuth(req: Request, _res: Response, next: NextFunction) {

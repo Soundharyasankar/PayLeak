@@ -3,13 +3,14 @@ import { Link } from "react-router-dom";
 import { ArrowRight, BarChart3, Check, Eye, EyeOff, ShieldCheck, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext.jsx";
+import { authErrorMessage } from "../utils/authSession.js";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, authNotice } = useAuth();
 
   const submit = async (event) => {
     event.preventDefault();
@@ -17,7 +18,7 @@ export default function Login() {
     try {
       await login({ email, password });
     } catch (error) {
-      toast.error(error.response?.data?.error?.message || error.message || "Could not sign in. Check your connection and try again.");
+      toast.error(authErrorMessage(error, "Could not sign in. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -41,6 +42,7 @@ export default function Login() {
           <div className="eyebrow">WELCOME BACK</div>
           <h2>Sign in to PayLeak</h2>
           <p className="muted">Your payment clarity is one step away.</p>
+          {authNotice && <p className="muted" role="status">{authNotice}</p>}
           <label className="field-label">Email address<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" /></label>
           <label className="field-label">Password<span className="password-field"><input type={showPassword ? "text" : "password"} autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /><button type="button" className="icon-button" aria-label="Show password" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
           <button className="button primary full" type="submit" disabled={loading}>{loading ? <span className="spinner" /> : <>Sign in <ArrowRight size={17} /></>}</button>

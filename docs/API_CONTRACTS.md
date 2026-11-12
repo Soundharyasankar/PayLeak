@@ -2,9 +2,13 @@
 
 Base URL: `/api`. Successful JSON responses use `{ "success": true, "data": ... }`.
 Errors use `{ "success": false, "error": { "code": "...", "message": "..." } }`.
-Authenticated browser requests use the `payleak_access` HTTP-only JWT cookie.
-API clients may also supply a JWT in the `Authorization` header. Health,
-authentication, and PayPal webhook endpoints do not require a user session.
+Authenticated browser requests use the HTTP-only JWT cookie. In production,
+`__Host-payleak_access` is Secure, SameSite=None, and Partitioned. The legacy
+`payleak_access` cookie is cleared during login/registration and accepted only
+as a migration fallback. Both names are host-only and expire after eight
+hours. API clients may also supply a JWT in the `Authorization` header. Health,
+registration, login, logout, and PayPal webhook endpoints do not require an
+existing user session; `/auth/me` and other protected endpoints do.
 The browser verifies the cookie with `GET /auth/me` after login or registration
 before marking the account authenticated. A 401 on a protected request clears
 the frontend session; a 403 keeps the session and reports insufficient access.

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, BarChart3, Check, ShieldCheck, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext.jsx";
+import { authErrorMessage } from "../utils/authSession.js";
 
 export default function Register() {
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
@@ -21,7 +22,7 @@ export default function Register() {
     try {
       await register({ name: form.name, email: form.email, password: form.password });
     } catch (error) {
-      toast.error(error.response?.data?.error?.message || error.message || "Could not create your account. Please try again.");
+      toast.error(authErrorMessage(error, "Could not create your account. Please try again."));
     } finally {
       setLoading(false);
     }
