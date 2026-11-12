@@ -3,6 +3,7 @@ import { Transaction } from "../models/Transaction.js";
 import { AppError } from "../utils/errors.js";
 import { calculateNetFromActual as calculateNetAmount } from "./financial.js";
 import { sharedPaypalDataFilter } from "./paypalIntegrationService.js";
+import { isConfirmedPaymentTransaction } from "./transactionEligibility.js";
 
 export async function listTransactions(userId: string, query: {
   page: number; limit: number; from?: Date; to?: Date; currency?: string; status?: string;
@@ -109,6 +110,7 @@ interface TransactionView {
   financialDataStatus: string;
   retrievedAt: Date;
   rawPaypal: unknown;
+  isConfirmedPayment?: boolean;
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -170,6 +172,7 @@ function toFrontendTransaction(record: TransactionView) {
     transactionType: record.transactionType,
     conversion: record.conversion,
     financialDataStatus: record.financialDataStatus,
+    isConfirmedPayment: isConfirmedPaymentTransaction(record),
     retrievedAt: record.retrievedAt,
   };
 }

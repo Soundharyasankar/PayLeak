@@ -6,13 +6,9 @@ import Panel from "../components/Panel.jsx";
 import Modal from "../components/Modal.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import { fetchTransaction, fetchTransactionPage } from "../services/transactionService.js";
-import { money } from "../utils/formatters.js";
+import { money, transactionStatusLabel, transactionTypeLabel } from "../utils/formatters.js";
 
 const PAGE_SIZE = 25;
-
-function statusLabel(status) {
-  return ({ S: "Completed", P: "Pending", V: "Reversed", D: "Denied" })[String(status).toUpperCase()] || status;
-}
 
 function errorMessage(error) {
   return error.response?.data?.error?.message || error.message || "The transaction request failed.";
@@ -127,7 +123,7 @@ export default function TransactionHistory() {
                   <td>{displayAmount(transaction.fee, transaction.feeCurrency || transaction.currency)}</td>
                   <td>{displayAmount(transaction.net, transaction.currency)}</td>
                   <td>{transaction.date}</td>
-                  <td><StatusBadge>{statusLabel(transaction.status)}</StatusBadge></td>
+                  <td><StatusBadge>{transactionStatusLabel(transaction.status)}</StatusBadge></td>
                   <td><button className="button secondary small-button" onClick={() => setSelectedId(transaction.id)}>View</button></td>
                 </tr>
               ))}
@@ -160,8 +156,8 @@ export default function TransactionHistory() {
           {detail && (
             <div className="transaction-detail-list">
               <p><span>PayPal transaction ID</span><b>{detail.id}</b></p>
-              <p><span>Type</span><b>{detail.transactionType || "Payment"}</b></p>
-              <p><span>Status</span><StatusBadge>{statusLabel(detail.status)}</StatusBadge></p>
+              <p><span>Type</span><b>{transactionTypeLabel(detail.transactionType)}</b></p>
+              <p><span>Status</span><StatusBadge>{transactionStatusLabel(detail.status)}</StatusBadge></p>
               <p><span>Payer</span><b>{detail.client || "Unknown payer"}</b></p>
               <p><span>Date</span><b>{detail.date}</b></p>
               <p><span>Gross amount</span><b>{money(detail.gross, detail.currency)}</b></p>

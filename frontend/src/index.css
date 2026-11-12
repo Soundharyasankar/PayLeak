@@ -141,8 +141,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .donut-center span { color: #979baa; font-size: 9px; }
 .breakdown-legend { display: grid; flex: 1; gap: 15px; }
 .breakdown-legend > div { display: grid; grid-template-columns: 8px 1fr; align-items: center; gap: 3px 7px; color: #858b9a; font-size: 9px; }
-.breakdown-legend i { grid-row: span 2; width: 7px; height: 7px; border-radius: 50%; }
+.breakdown-legend i { grid-row: span 4; width: 7px; height: 7px; border-radius: 50%; }
 .breakdown-legend b { grid-column: 2; color: #34394d; font-size: 11px; }
+.breakdown-legend small { grid-column: 2; color: #858b9a; font-size: 10px; }
 .dashboard-lower-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(280px, .9fr); align-items: start; gap: 14px; }
 .transactions-panel { padding-right: 0; padding-left: 0; }
 .transactions-panel > .panel-heading { padding: 0 18px; }

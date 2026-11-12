@@ -4,6 +4,7 @@ import { Invoice } from "../models/Invoice.ts";
 import { Transaction } from "../models/Transaction.js";
 import { formatCurrencyAmount } from "../utils/money.js";
 import { sharedPaypalDataFilter, sharedPaypalInvoiceFilter } from "./paypalIntegrationService.js";
+import { confirmedPaymentFilter, isConfirmedPaymentTransaction } from "./transactionEligibility.js";
 
 interface CurrencyTotals {
   currency: string;
@@ -25,16 +26,25 @@ function totalsForCurrency(map: Map<string, CurrencyTotals>, currency: string) {
   return totals;
 }
 
-export async function dashboardAnalytics(userId: string) {
-  const transactionFilter = await sharedPaypalDataFilter(userId);
-  const invoiceFilter = await sharedPaypalInvoiceFilter(userId);
-  const records = await Transaction.find(transactionFilter).select("grossAmount grossCurrency feeAmount feeCurrency feeSource finalAmount finalCurrency conversion").lean();
+interface DashboardTransaction {
+  transactionType: string;
+  status: string;
+  grossAmount: string;
+  grossCurrency: string;
+  feeAmount?: string | null;
+  feeCurrency?: string | null;
+  feeSource?: string;
+  conversion: { source: string };
+}
+
+export function summarizeDashboardTransactions(records: ReadonlyArray<DashboardTransaction>) {
+  const confirmedPayments = records.filter(isConfirmedPaymentTransaction);
   const currencies = new Map<string, CurrencyTotals>();
   const feeCurrencies = new Map<string, Decimal>();
   let conversionUnknownCount = 0;
   let actualConversionCount = 0;
 
-  for (const transaction of records) {
+  for (const transaction of confirmedPayments) {
     const gross = totalsForCurrency(currencies, transaction.grossCurrency);
     gross.gross = gross.gross.plus(transaction.grossAmount);
     gross.grossCount += 1;
@@ -61,36 +71,73 @@ export async function dashboardAnalytics(userId: string) {
     else conversionUnknownCount += 1;
   }
 
-  const [invoices, monthly] = await Promise.all([
-    Invoice.find(invoiceFilter).select("status amount currency").lean(),
-    monthlyIncome(transactionFilter),
-  ]);
-  const currencyData = [...currencies.values()].map((item) => ({
-    currency: item.currency,
-    totalGross: formatCurrencyAmount(item.gross, item.currency),
-    totalActualFees: formatCurrencyAmount(item.fees, item.currency),
-    totalNetWhenFeeCurrencyMatches: formatCurrencyAmount(item.net, item.currency),
-    transactionCount: item.grossCount,
-    feeCountSameCurrency: item.feeCount,
-    feesUnavailableOrDifferentCurrency: item.unavailableFeeCount,
-    netStatus: item.netCount === item.grossCount ? "complete" : "incomplete",
-  }));
-  const statuses = invoices.reduce<Record<string, number>>((result, invoice) => {
-    result[invoice.status] = (result[invoice.status] ?? 0) + 1;
-    return result;
-  }, {});
-
   return {
-    transactionCount: records.length,
-    currencies: currencyData,
-    feesByCurrency: [...feeCurrencies].map(([currency, value]) => ({ currency, actualFees: formatCurrencyAmount(value, currency), source: "actual_paypal" })),
+    transactionCount: confirmedPayments.length,
+    currencies: [...currencies.values()].map((item) => ({
+      currency: item.currency,
+      totalGross: formatCurrencyAmount(item.gross, item.currency),
+      totalActualFees: formatCurrencyAmount(item.fees, item.currency),
+      totalNetWhenFeeCurrencyMatches: formatCurrencyAmount(item.net, item.currency),
+      transactionCount: item.grossCount,
+      feeCountSameCurrency: item.feeCount,
+      feesUnavailableOrDifferentCurrency: item.unavailableFeeCount,
+      netStatus: item.netCount === item.grossCount ? "complete" : "incomplete",
+    })),
+    feesByCurrency: [...feeCurrencies].map(([currency, value]) => ({
+      currency,
+      actualFees: formatCurrencyAmount(value, currency),
+      source: "actual_paypal",
+    })),
     conversions: {
       actualOrQuotedCount: actualConversionCount,
       unavailableCount: conversionUnknownCount,
       status: conversionUnknownCount ? "incomplete" : "complete",
       explanation: "Conversion totals are not inferred from generic market rates.",
     },
-    invoices: { total: invoices.length, byStatus: statuses },
+  };
+}
+
+export function summarizePaypalInvoices(records: ReadonlyArray<{ source?: string; status: string }>) {
+  const paypalInvoices = records.filter((invoice) => invoice.source === "paypal");
+  const byStatus = paypalInvoices.reduce<Record<string, number>>((result, invoice) => {
+    result[invoice.status] = (result[invoice.status] ?? 0) + 1;
+    return result;
+  }, {});
+  const openStatuses = new Set(["Draft", "Sent", "Partially Paid", "Overdue"]);
+
+  return {
+    total: paypalInvoices.length,
+    openCount: paypalInvoices.filter((invoice) => openStatuses.has(invoice.status)).length,
+    overdueCount: byStatus.Overdue ?? 0,
+    byStatus,
+  };
+}
+
+export async function dashboardAnalytics(userId: string) {
+  const transactionFilter = await sharedPaypalDataFilter(userId);
+  const eligibleTransactionFilter = { $and: [transactionFilter, confirmedPaymentFilter] };
+  const invoiceFilter = await sharedPaypalInvoiceFilter(userId);
+  const records = await Transaction.find(eligibleTransactionFilter)
+    .select("transactionType status grossAmount grossCurrency feeAmount feeCurrency feeSource conversion")
+    .lean();
+  const transactionSummary = summarizeDashboardTransactions(records);
+
+  const [invoices, monthly] = await Promise.all([
+    Invoice.find(invoiceFilter).select("status amount currency source").lean(),
+    monthlyIncome(eligibleTransactionFilter),
+  ]);
+  const statuses = invoices.reduce<Record<string, number>>((result, invoice) => {
+    result[invoice.status] = (result[invoice.status] ?? 0) + 1;
+    return result;
+  }, {});
+
+  return {
+    ...transactionSummary,
+    invoices: {
+      total: invoices.length,
+      byStatus: statuses,
+      paypal: summarizePaypalInvoices(invoices),
+    },
     monthly,
   };
 }
@@ -147,7 +194,8 @@ export async function leakAnalytics(userId: string) {
 }
 
 export async function monthlyAnalytics(userId: string) {
-  return monthlyIncome(await sharedPaypalDataFilter(userId));
+  const filter = await sharedPaypalDataFilter(userId);
+  return monthlyIncome({ $and: [filter, confirmedPaymentFilter] });
 }
 
 export async function clientAnalytics(userId: string) {
@@ -165,7 +213,7 @@ export async function clientAnalytics(userId: string) {
 
 export async function currencyAnalytics(userId: string) {
   const data = await Transaction.aggregate([
-    { $match: await sharedPaypalDataFilter(userId) },
+    { $match: { $and: [await sharedPaypalDataFilter(userId), confirmedPaymentFilter] } },
     { $group: { _id: "$grossCurrency", transactionCount: { $sum: 1 }, grossAmount: { $sum: { $convert: { input: "$grossAmount", to: "decimal", onError: "0", onNull: "0" } } } } },
     { $sort: { _id: 1 } },
   ]);

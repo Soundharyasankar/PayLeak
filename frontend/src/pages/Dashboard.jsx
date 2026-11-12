@@ -7,7 +7,7 @@ import StatCard from "../components/StatCard.jsx";
 import Panel from "../components/Panel.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import { useAppData } from "../context/AppContext.jsx";
-import { getInvoiceTotals, money } from "../utils/formatters.js";
+import { getInvoiceTotals, money, transactionStatusLabel } from "../utils/formatters.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 function currencySummary(items, valueKey) {
@@ -21,27 +21,32 @@ export default function Dashboard() {
   const [currency, setCurrency] = useState("");
   const currencies = analytics?.currencies ?? [];
   const selectedCurrency = currency || currencies[0]?.currency || "";
+  const dashboardTransactions = useMemo(
+    () => transactions.filter((item) => item.isConfirmedPayment),
+    [transactions],
+  );
   const monthlyCounts = useMemo(() => {
-    const months = new Map();
-    transactions.filter((item) => !selectedCurrency || item.currency === selectedCurrency).forEach((item) => {
-      const date = new Date(`${item.date}T12:00:00`);
-      const month = date.toLocaleString("en-US", { month: "short", year: "2-digit" });
-      months.set(month, (months.get(month) || 0) + 1);
-    });
-    return [...months].map(([month, count]) => ({ month, count }));
-  }, [transactions, selectedCurrency]);
+    return (analytics?.monthly ?? [])
+      .filter((item) => !selectedCurrency || item.currency === selectedCurrency)
+      .map((item) => ({
+        month: new Date(Date.UTC(item.year, item.month - 1, 1))
+          .toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }),
+        count: item.transactionCount,
+      }));
+  }, [analytics, selectedCurrency]);
   const invoiceTotals = getInvoiceTotals(invoices);
   const unavailableConversions = analytics?.conversions?.unavailableCount ?? 0;
   const actualFees = analytics?.feesByCurrency ?? [];
+  const paypalInvoices = analytics?.invoices?.paypal;
 
   return (
     <div className="page-enter">
       <PageHeader eyebrow="OVERVIEW" title="Financial Overview" description="Review PayPal transaction records and actual fees available for your account." action={<div className="dashboard-header-actions"><span className={`paypal-dashboard-status ${paypal?.connected ? "connected" : ""}`} role="status"><i />{paypal?.connected ? `PayPal ${paypal.environment === "sandbox" ? "Sandbox " : ""}Connected` : paypal ? "PayPal not connected" : "PayPal status unavailable"}</span><Link className="button primary" to="/invoices/create"><FilePlus2 size={17} /> Create invoice</Link></div>} />
       <div className="stats-grid four">
-        <StatCard label="Transactions" value={analytics?.transactionCount ?? transactions.length} note="Records stored for your account" icon={Activity} tone="purple" />
+        <StatCard label="Transactions" value={analytics?.transactionCount ?? "—"} note="Confirmed PayPal payments only" icon={Activity} tone="purple" />
         <StatCard label="Gross volume" value={currencySummary(currencies, "totalGross")} note="Kept separate by currency" icon={Wallet} tone="blue" />
-        <StatCard label="Verified PayPal fees" value={currencySummary(actualFees, "actualFees")} note={actualFees.length ? "Actual fees returned by PayPal" : "No verified fees available"} icon={CircleDollarSign} tone="orange" />
-        <StatCard label="Open invoices" value={invoiceTotals.pending + invoiceTotals.overdue} note={`${invoiceTotals.overdue} overdue · stored in your account`} icon={FilePlus2} tone="red" />
+        <StatCard label="Verified PayPal fees" value={currencySummary(actualFees, "actualFees")} note={actualFees.length ? "Actual fees only; missing fees stay unavailable" : "No verified fees available"} icon={CircleDollarSign} tone="orange" />
+        <StatCard label="Open PayPal invoices" value={paypalInvoices?.openCount ?? "—"} note={`${paypalInvoices?.overdueCount ?? invoiceTotals.overdue} overdue · drafts are not payments`} icon={FilePlus2} tone="red" />
       </div>
 
       <div className="dashboard-chart-grid">
@@ -49,16 +54,16 @@ export default function Dashboard() {
           {monthlyCounts.length ? <div className="chart-wrap earnings-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={monthlyCounts} margin={{ left: -18, right: 6, top: 10 }}><CartesianGrid stroke="#edf0f5" vertical={false} /><XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: "#929bad", fontSize: 12 }} dy={10} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: "#929bad", fontSize: 11 }} /><Tooltip formatter={(value) => [`${value} transactions`, "Count"]} contentStyle={{ border: "1px solid #eceef3", borderRadius: 12 }} /><Bar dataKey="count" fill="#8167ff" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div> : <div className="empty-state"><Activity size={23} /><b>No transaction history</b><span>Available shared PayPal records appear after a successful sync.</span></div>}
         </Panel>
         <Panel title="Gross volume by currency" subtitle="Values come from saved PayPal records">
-          {currencies.length ? <div className="breakdown-legend">{currencies.map((item) => <div key={item.currency}><i style={{ background: "#7658f6" }} /><span>{item.currency} · {item.transactionCount} transactions</span><b>{item.totalGross}</b></div>)}</div> : <div className="empty-state"><Wallet size={23} /><b>No financial records yet</b><span>Available totals appear after PayPal transactions are synced.</span></div>}
+          {currencies.length ? <div className="breakdown-legend">{currencies.map((item) => <div key={item.currency}><i style={{ background: "#7658f6" }} /><span>{item.currency} · {item.transactionCount} confirmed payments</span><b>Gross {money(item.totalGross, item.currency)}</b><small>{item.feesUnavailableOrDifferentCurrency > 0 ? "Known fees" : "Fees"} {money(item.totalActualFees, item.currency)} · Net {item.netStatus === "complete" ? money(item.totalNetWhenFeeCurrencyMatches, item.currency) : "Unavailable"}</small>{item.feesUnavailableOrDifferentCurrency > 0 && <small>{item.feesUnavailableOrDifferentCurrency} fee(s) unavailable or in another currency.</small>}</div>)}</div> : <div className="empty-state"><Wallet size={23} /><b>No financial records yet</b><span>Available totals appear after PayPal transactions are synced.</span></div>}
           {unavailableConversions > 0 && <div className="table-footnote">{unavailableConversions} transaction(s) lack verified conversion data.</div>}
         </Panel>
       </div>
 
       <div className="dashboard-lower-grid">
-        <Panel title="Recent transactions" subtitle="Actual records retrieved for the configured merchant account" action={<Link className="panel-link" to="/leak-analysis">View breakdowns <ArrowRight size={14} /></Link>} className="transactions-panel">
+        <Panel title="Recent transactions" subtitle="Confirmed payment records only" action={<Link className="panel-link" to="/leak-analysis">View breakdowns <ArrowRight size={14} /></Link>} className="transactions-panel">
           <div className="table-scroll"><table className="data-table"><thead><tr><th>Transaction</th><th>Client</th><th>Gross</th><th>Actual fee</th><th>Net</th><th>Date</th><th>Status</th></tr></thead><tbody>
-            {transactions.slice(0, 8).map((row) => <tr key={row.id}><td><b className="table-primary">{row.id}</b></td><td>{row.client}</td><td>{money(Number(row.gross), row.currency)}</td><td className={row.fee == null ? "" : "loss-text"}>{row.fee == null ? "Unavailable" : money(Number(row.fee), row.feeCurrency || row.currency)}</td><td>{row.net == null ? "Unavailable" : money(Number(row.net), row.currency)}</td><td>{row.date}</td><td><StatusBadge>{row.status}</StatusBadge></td></tr>)}
-            {!transactions.length && <tr><td colSpan="7"><div className="empty-state"><Activity size={23} /><b>No synced transactions</b><span>Transactions appear after available shared PayPal data is synced.</span></div></td></tr>}
+            {dashboardTransactions.slice(0, 8).map((row) => <tr key={row.id}><td><b className="table-primary">{row.id}</b></td><td>{row.client}</td><td>{money(Number(row.gross), row.currency)}</td><td className={row.fee == null ? "" : "loss-text"}>{row.fee == null ? "Unavailable" : money(Math.abs(Number(row.fee)), row.feeCurrency || row.currency)}</td><td>{row.net == null ? "Unavailable" : money(Number(row.net), row.currency)}</td><td>{row.date}</td><td><StatusBadge>{transactionStatusLabel(row.status)}</StatusBadge></td></tr>)}
+            {!dashboardTransactions.length && <tr><td colSpan="7"><div className="empty-state"><Activity size={23} /><b>No confirmed payments</b><span>Pending, reversed, and non-payment PayPal records remain available in transaction history.</span></div></td></tr>}
           </tbody></table></div>
           <div className="table-footnote">Missing fees, conversions, and payout values remain unavailable; no estimate is substituted.</div>
         </Panel>
