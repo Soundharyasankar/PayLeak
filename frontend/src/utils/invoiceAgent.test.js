@@ -128,3 +128,40 @@ test("invoice agent payload preserves priced line items for server-side total ca
     { description: "Backend development", amount: "350" },
   ]);
 });
+
+test("assistant and draft requests reject overlong service and line-item descriptions before sending", () => {
+  const longDescription = "x".repeat(201);
+  assert.throws(() => buildInvoiceAssistantRequest(
+    "Update the invoice.",
+    { services: [longDescription] },
+    [],
+  ), /service description must be 200 characters or fewer/);
+  assert.throws(() => buildInvoiceAssistantRequest(
+    "Update the invoice.",
+    { lineItems: [{ description: longDescription, amount: "45000" }] },
+    [],
+  ), /line-item description must be between 1 and 200 characters/);
+  assert.throws(() => invoicePayloadFromDraft({
+    services: ["Website development"],
+    lineItems: [{ description: longDescription, amount: "45000" }],
+  }), /line-item description must be between 1 and 200 characters/);
+});
+
+test("valid invoice descriptions are trimmed without truncating their content", () => {
+  const detail = "Homepage design, frontend implementation, backend setup, and production deployment";
+  const payload = invoicePayloadFromDraft({
+    client: "Rahul Sharma",
+    email: "client@example.com",
+    project: "Website development",
+    services: [` ${detail} `],
+    lineItems: [{ description: ` ${detail} `, amount: "45000" }],
+    amount: "45000",
+    currency: "INR",
+    description: `Website development\n${detail}`,
+    date: "2026-11-12",
+    due: "2026-11-19",
+  });
+
+  assert.deepEqual(payload.services, [detail]);
+  assert.deepEqual(payload.lineItems, [{ description: detail, amount: "45000" }]);
+});

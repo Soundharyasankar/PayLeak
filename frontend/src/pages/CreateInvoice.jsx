@@ -56,7 +56,7 @@ export default function CreateInvoice() {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const retryPaypal = async (invoice = agent.invoice, activeAgent = agent, activeOperation = operationId.current, manageProcessing = true) => {
+  const retryPaypal = async (invoice = agent.invoice, activeAgent = agent, activeOperation = operationId.current, manageProcessing = true, notify = true) => {
     if (!invoice || invoice.source === "paypal") return invoice;
     if (manageProcessing) setProcessing(true);
     try {
@@ -73,14 +73,14 @@ export default function CreateInvoice() {
         invoice: linked,
         paypalError: "",
       }));
-      toast.success("PayPal confirmed the invoice draft.");
+      if (notify) toast.success("PayPal confirmed the invoice draft.");
       setShowPreview(true);
       return linked;
     } catch (error) {
       if (activeOperation !== operationId.current) return invoice;
       const message = error.response?.data?.error?.message || error.message || "PayPal draft creation failed.";
       setAgent((current) => ({ ...current, invoice, paypalError: message }));
-      toast.error(`PayLeak saved the draft, but PayPal could not create it: ${message}`);
+      if (notify) toast.error(`PayLeak saved the draft, but PayPal could not create it: ${message}`);
       return invoice;
     } finally {
       if (manageProcessing && activeOperation === operationId.current) setProcessing(false);
@@ -116,7 +116,7 @@ export default function CreateInvoice() {
       toast.success("Your PayPal invoice draft was updated.");
       return localInvoice;
     }
-    return retryPaypal(localInvoice, updatedAgent, activeOperation, false);
+    return retryPaypal(localInvoice, updatedAgent, activeOperation, false, false);
   };
 
   const sendMessage = async (event) => {
@@ -141,7 +141,9 @@ export default function CreateInvoice() {
       const nextAgent = {
         ...activeAgent,
         draft: result.draft,
-        messages: [...messages, { role: "assistant", text: result.reply }],
+        messages: result.ready
+          ? messages
+          : [...messages, { role: "assistant", text: result.reply }],
       };
       setAgent(nextAgent);
       setForm({ ...result.draft });
@@ -193,7 +195,6 @@ export default function CreateInvoice() {
         || error.message
         || "I couldn't process those invoice details. Please try again.";
       setAgent((current) => ({ ...current, messages: [...current.messages, { role: "assistant", text: messageText }] }));
-      toast.error(messageText);
     } finally {
       if (activeOperation === operationId.current) {
         processingRef.current = false;

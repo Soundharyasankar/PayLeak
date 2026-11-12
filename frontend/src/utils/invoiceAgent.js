@@ -20,12 +20,35 @@ export function createEmptyInvoiceAgent() {
   };
 }
 
+function validateInvoiceDescriptions(draft) {
+  if (typeof draft.description === "string" && draft.description.length > 2000) {
+    throw new Error("The invoice description must be 2,000 characters or fewer.");
+  }
+  if (Array.isArray(draft.services)) {
+    if (draft.services.length > 30) throw new Error("An invoice can include at most 30 services.");
+    if (draft.services.some((service) => typeof service !== "string" || service.trim().length > 200)) {
+      throw new Error("Each service description must be 200 characters or fewer.");
+    }
+  }
+  if (Array.isArray(draft.lineItems)) {
+    if (draft.lineItems.length > 30) throw new Error("An invoice can include at most 30 line items.");
+    if (draft.lineItems.some((item) => !item
+      || typeof item.description !== "string"
+      || !item.description.trim()
+      || item.description.trim().length > 200)) {
+      throw new Error("Each line-item description must be between 1 and 200 characters.");
+    }
+  }
+}
+
 export function invoicePayloadFromDraft(draft) {
-  return {
+  const payload = {
     client: draft.client,
     email: draft.email,
     project: draft.project || "",
-    services: draft.services || [],
+    services: (draft.services || [])
+      .filter((service) => typeof service === "string" && service.trim() !== "")
+      .map((service) => service.trim()),
     amount: String(draft.amount),
     currency: draft.currency,
     description: draft.description,
@@ -33,11 +56,13 @@ export function invoicePayloadFromDraft(draft) {
     due: draft.due,
     ...(Array.isArray(draft.lineItems) && draft.lineItems.length > 0
       ? { lineItems: draft.lineItems.map((item) => ({
-        description: item.description,
+        description: typeof item.description === "string" ? item.description.trim() : item.description,
         amount: String(item.amount),
       })) }
       : {}),
   };
+  validateInvoiceDescriptions(payload);
+  return payload;
 }
 
 export function buildInvoiceAssistantRequest(message, draft = {}, history = []) {
@@ -57,7 +82,9 @@ export function buildInvoiceAssistantRequest(message, draft = {}, history = []) 
       .map((field) => [field, draft[field].trim()]),
   );
   if (Array.isArray(draft.services) && draft.services.length > 0) {
-    normalizedDraft.services = draft.services.filter((service) => typeof service === "string" && service.trim() !== "");
+    normalizedDraft.services = draft.services
+      .filter((service) => typeof service === "string" && service.trim() !== "")
+      .map((service) => service.trim());
   }
   if (Array.isArray(draft.lineItems) && draft.lineItems.length > 0) {
     normalizedDraft.lineItems = draft.lineItems
@@ -65,6 +92,7 @@ export function buildInvoiceAssistantRequest(message, draft = {}, history = []) 
       .map(({ description, amount }) => ({ description: description.trim(), amount: amount.trim() }));
   }
 
+  validateInvoiceDescriptions(normalizedDraft);
   return {
     message: message.trim(),
     draft: normalizedDraft,

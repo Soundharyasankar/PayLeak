@@ -7,6 +7,7 @@ process.env.JWT_SECRET ??= "test-only-signing-secret-that-is-never-used";
 process.env.FRONTEND_URL ??= "http://localhost:5173";
 process.env.NODE_ENV = "test";
 process.env.GEMINI_API_KEY = "";
+process.env.GROQ_API_KEY = "";
 
 test("health and protected route responses use the documented API envelope", async (context) => {
   const { app } = await import("./app.js");
@@ -180,7 +181,7 @@ test("health and protected route responses use the documented API envelope", asy
     }),
   });
   assert.equal(validAssistantRequest.status, 503);
-  assert.equal((await validAssistantRequest.json() as { error: { code: string } }).error.code, "AI_UNAVAILABLE");
+  assert.equal((await validAssistantRequest.json() as { error: { code: string } }).error.code, "INVOICE_AI_NOT_CONFIGURED");
 
   const protectedLocalInvoicePublish = await fetch(`${baseUrl}/api/invoices/507f1f77bcf86cd799439011/paypal`, { method: "POST" });
   assert.equal(protectedLocalInvoicePublish.status, 401);

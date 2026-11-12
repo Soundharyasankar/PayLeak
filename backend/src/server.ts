@@ -3,6 +3,11 @@ import { env } from "./config/env.js";
 import mongoose from "mongoose";
 
 async function start() {
+  if (!env.GROQ_API_KEY) {
+    throw new Error(
+      "Missing GROQ_API_KEY. Set it in backend/.env for local development or the backend service environment in production.",
+    );
+  }
   await ensureDatabaseConnection();
   const server = app.listen(env.PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${env.PORT}`);

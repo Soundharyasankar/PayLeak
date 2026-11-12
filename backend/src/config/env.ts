@@ -1,5 +1,9 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+
+dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../.env") });
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -25,6 +29,8 @@ const schema = z.object({
     (value) => value === "" ? undefined : value,
     z.string().regex(/^[a-f\d]{24}$/i, "PAYPAL_ACCOUNT_OWNER_USER_ID must be a MongoDB user ID.").optional(),
   ),
+  GROQ_API_KEY: z.string().trim().optional().default(""),
+  GROQ_INVOICE_MODEL: z.string().trim().min(1).default("openai/gpt-oss-120b"),
   GEMINI_API_KEY: z.string().optional().default(""),
   GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
 }).superRefine((config, context) => {

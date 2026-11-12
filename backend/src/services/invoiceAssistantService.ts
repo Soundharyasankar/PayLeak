@@ -3,7 +3,7 @@ import { z } from "zod";
 import { paypalInvoiceCurrencies } from "../config/paypalCurrencies.js";
 import { AppError } from "../utils/errors.js";
 import { calculateInvoiceLineItemTotal, type InvoiceLineItem } from "../utils/invoiceLineItems.js";
-import { understandInvoiceMessage, type ConversationMessage } from "./aiService.js";
+import { understandInvoiceWithGroq } from "./invoiceAiService.js";
 
 const invoiceDraftSchema = z.object({
   client: z.string().max(160).optional(),
@@ -22,10 +22,31 @@ const invoiceDraftSchema = z.object({
 }).strict();
 
 export type InvoiceDraftContext = z.infer<typeof invoiceDraftSchema>;
+type InvoiceConversationMessage = { role: "user" | "assistant"; text: string };
+type InvoiceAssistantUpdates = {
+  client?: string;
+  email?: string;
+  amount?: string;
+  currency?: string;
+  project?: string;
+  services?: string[];
+  lineItems?: InvoiceLineItem[];
+  description?: string;
+  dueInDays?: number;
+  dueDate?: string;
+  currencyAmountsConfirmed?: boolean;
+  addService?: { description: string; amount: string; currency?: string };
+  removeService?: string;
+  updateService?: { description: string; amount: string };
+};
 
 function validDateOnly(value: string) {
   const date = new Date(`${value}T00:00:00.000Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function todayUtc() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 type RequiredInvoiceField = "client" | "email" | "amount" | "currency" | "description" | "due";
@@ -33,7 +54,7 @@ type RequiredInvoiceField = "client" | "email" | "amount" | "currency" | "descri
 const requiredQuestions: Record<RequiredInvoiceField, (draft: InvoiceDraftContext) => string> = {
   client: () => "Who is this invoice for?",
   email: (draft) => `What is ${draft.client ? `${draft.client}'s ` : "the client's "}email address?`,
-  amount: () => "What total amount should I invoice?",
+  amount: () => "What is the invoice total? If you want separate priced items, please provide their quantities and unit prices.",
   currency: () => "Which currency should I use? Please provide an ISO code such as USD, INR, or EUR.",
   description: () => "What work or service should the invoice describe?",
   due: () => "When is payment due? You can give a date or a number of days from today.",
@@ -53,14 +74,14 @@ function cleanDescription(value: string) {
     .join("\n");
 }
 
-export function firstMissingInvoiceField(draft: InvoiceDraftContext): RequiredInvoiceField | null {
+export function firstMissingInvoiceField(draft: InvoiceDraftContext, referenceDate = todayUtc()): RequiredInvoiceField | null {
   if (!draft.client?.trim()) return "client";
-  if (!draft.email?.trim()) return "email";
-  if (!draft.amount?.trim() || !/^\d+(?:\.\d+)?$/.test(draft.amount) || !new Decimal(draft.amount).gt(0)) return "amount";
+  if (!draft.email?.trim() || !z.string().email().safeParse(draft.email).success) return "email";
   if (!draft.currency?.trim()) return "currency";
   if (!Object.hasOwn(paypalInvoiceCurrencies, draft.currency)) return "currency";
   if (!draft.description?.trim()) return "description";
-  if (!draft.date || !draft.due) return "due";
+  if (!draft.lineItems?.length || !draft.amount?.trim() || !/^\d+(?:\.\d+)?$/.test(draft.amount) || !new Decimal(draft.amount).gt(0)) return "amount";
+  if (!draft.date || !draft.due || !validDateOnly(draft.due) || draft.due < referenceDate || draft.due < draft.date) return "due";
   return null;
 }
 
@@ -75,45 +96,242 @@ export function invoiceAssistantReply(missingField: RequiredInvoiceField | null,
 export async function understandInvoiceTurn(
   message: string,
   currentDraftInput: unknown,
-  history: ConversationMessage[] = [],
+  history: InvoiceConversationMessage[] = [],
 ) {
   const currentDraft = invoiceDraftSchema.parse(currentDraftInput);
   if ((currentDraft.date && !validDateOnly(currentDraft.date))
     || (currentDraft.due && !validDateOnly(currentDraft.due))) {
     throw new AppError(422, "The current invoice dates are invalid. Please correct them before continuing.", "INVOICE_DATE_INVALID");
   }
-  const understanding = await understandInvoiceMessage(message, currentDraft, history);
-  const intent = understanding.intent ?? (Object.keys(currentDraft).length ? "update_invoice" : "create_invoice");
-  if (understanding.clarificationRequired || intent === "clarify") {
+  const intent = Object.keys(currentDraft).length ? "update_invoice" : "create_invoice";
+  if (/\b(?:show|view|preview|open)\b.*\binvoice\b/i.test(message)) {
     return {
       draft: currentDraft,
       missingField: null,
       ready: false,
-      intent: "clarify" as const,
-      reply: understanding.clarificationQuestion
-        ?? understanding.responseMessage
-        ?? "I found conflicting invoice details. Which value should I use?",
+      intent: "show_invoice" as const,
+      reply: "Opening your current invoice preview.",
     };
   }
-  if (intent === "show_invoice" || intent === "retry_paypal") {
+  if (/\b(?:retry|try)\b.*\bpaypal\b/i.test(message)) {
     return {
       draft: currentDraft,
       missingField: null,
       ready: false,
-      intent,
-      reply: understanding.responseMessage
-        ?? (intent === "show_invoice" ? "Opening your current invoice preview." : "Retrying PayPal for your saved local draft."),
+      intent: "retry_paypal" as const,
+      reply: "Retrying PayPal for your saved local draft.",
     };
   }
-  const draft = applyInvoiceUpdates(currentDraft, understanding.updates);
-  const missingField = firstMissingInvoiceField(draft);
-  const reply = invoiceAssistantReply(missingField, draft);
-  return { draft, missingField, ready: missingField === null, intent, reply };
+  const understanding = await understandInvoiceWithGroq(message, currentDraft, history);
+  const result = invoiceAiResultToDraft(currentDraft, understanding);
+  const invalidCurrency = Boolean(
+    understanding.invoice.currency
+    && !Object.hasOwn(paypalInvoiceCurrencies, understanding.invoice.currency.toUpperCase()),
+  );
+  const invalidDueDate = Boolean(
+    understanding.invoice.due_date
+    && !validDateOnly(understanding.invoice.due_date),
+  );
+  const missingField = invalidCurrency
+    ? "currency"
+    : invalidDueDate
+      ? "due"
+      : firstMissingInvoiceField(result.draft)
+        || (result.totalMismatch || result.requiresAmountClarification ? "amount" : null);
+  const ready = missingField === null;
+  const reply = ready
+    ? understanding.assistant_message
+    : result.totalMismatch && missingField === "amount"
+      ? `The priced items total ${result.totalMismatch.currency} ${result.totalMismatch.calculated}, but you stated ${result.totalMismatch.currency} ${result.totalMismatch.stated}. Which amount should I use?`
+      : result.requiresAmountClarification && understanding.follow_up_question
+        ? understanding.follow_up_question
+        : invoiceAssistantReply(missingField, result.draft);
+  return { draft: result.draft, missingField, ready, intent, reply };
+}
+
+function itemDescription(name: string, details: string) {
+  const trimmedName = name.trim();
+  const trimmedDetails = details.trim();
+  if (!trimmedDetails) return trimmedName;
+  if (!trimmedName || trimmedDetails.toLocaleLowerCase().includes(trimmedName.toLocaleLowerCase())) {
+    return trimmedDetails;
+  }
+  return `${trimmedName}: ${trimmedDetails}`;
+}
+
+function conciseInvoiceItemDescription(name: string, details: string) {
+  const formatted = itemDescription(name, details);
+  if (formatted.length <= 200) return formatted;
+
+  const trimmedDetails = details.trim();
+  if (trimmedDetails.length > 0 && trimmedDetails.length <= 200) return trimmedDetails;
+
+  const trimmedName = name.trim();
+  if (trimmedName.length > 0 && trimmedName.length <= 200) return trimmedName;
+
+  throw new AppError(422, "Each invoice item needs a useful description of 200 characters or fewer.", "INVOICE_ITEM_INVALID");
+}
+
+function uniqueDescriptions(values: string[]) {
+  const seen = new Set<string>();
+  return values.map((value) => value.trim()).filter((value) => {
+    const key = value.toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function joinServiceDescriptions(values: string[]) {
+  const items = uniqueDescriptions(values).map((value) => value.replace(/[.!?]+$/, ""));
+  if (items.length < 2) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function consolidatedItemName(project: string | undefined) {
+  const title = project?.trim().replace(/\b[a-z]/g, (letter) => letter.toUpperCase()) || "Invoice";
+  return /\bservices?$/i.test(title) ? title : `${title} Services`;
+}
+
+function consolidatedItemDescription(
+  items: Array<{ name: string; description: string }>,
+  currentDraft: InvoiceDraftContext,
+  project: string | undefined,
+) {
+  const itemDescriptions = items.map((item) => item.name.trim() || item.description.trim());
+  const existingServices = currentDraft.services ?? [];
+  const existingDescription = currentDraft.description
+    ?.split(/\r?\n/)
+    .filter((line) => line.trim() && line.trim().toLocaleLowerCase() !== project?.toLocaleLowerCase());
+  const details = joinServiceDescriptions(
+    itemDescriptions.length
+      ? itemDescriptions
+      : existingServices.length
+        ? existingServices
+        : existingDescription ?? (project ? [project] : []),
+  );
+  return details && !/[.!?]$/.test(details) ? `${details}.` : details;
+}
+
+export function invoiceAiResultToDraft(
+  currentDraft: InvoiceDraftContext,
+  response: Awaited<ReturnType<typeof understandInvoiceWithGroq>>,
+  referenceDate = todayUtc(),
+) {
+  const invoice = response.invoice;
+  const currency = invoice.currency?.trim().toUpperCase() || currentDraft.currency;
+  const hasSupportedCurrency = Boolean(currency && Object.hasOwn(paypalInvoiceCurrencies, currency));
+  const statedTotal = invoice.total_amount === null
+    ? undefined
+    : new Decimal(invoice.total_amount.toString()).toFixed();
+  const hasItemValues = invoice.items.some((item) => item.quantity !== null || item.unit_price !== null);
+  const hasCompleteItems = invoice.items.length > 0
+    && invoice.items.every((item) => item.quantity !== null && item.unit_price !== null);
+  const requiresAmountClarification = response.status === "needs_info"
+    && response.missing_fields.includes("total_amount")
+    && (response.missing_fields.includes("item_price")
+      || response.missing_fields.includes("item_quantity"));
+  const currencyChanged = Boolean(invoice.currency && currentDraft.currency
+    && invoice.currency.toUpperCase() !== currentDraft.currency.toUpperCase());
+  const canKeepExistingItems = Boolean(currentDraft.lineItems?.length && !currencyChanged);
+  const reusableDraftTotal = currentDraft.amount
+    && /^\d+(?:\.\d+)?$/.test(currentDraft.amount)
+    && new Decimal(currentDraft.amount).gt(0)
+    ? currentDraft.amount
+    : undefined;
+  const consolidationTotal = statedTotal
+    ?? (!currentDraft.lineItems?.length ? reusableDraftTotal : undefined);
+  const project = invoice.project_name?.trim() || currentDraft.project;
+
+  let lineItems: InvoiceLineItem[] | undefined;
+  if (hasSupportedCurrency && hasCompleteItems && !requiresAmountClarification) {
+    lineItems = invoice.items.map((item) => {
+      if (item.quantity === null || item.unit_price === null
+        || item.quantity <= 0 || item.unit_price <= 0) {
+        throw new AppError(422, "Each invoice item must have a positive quantity and unit price.", "INVOICE_ITEM_INVALID");
+      }
+      const amount = new Decimal(item.quantity.toString())
+        .times(new Decimal(item.unit_price.toString()));
+      if (!amount.isFinite() || amount.lte(0)) {
+        throw new AppError(422, "Each invoice item must have a valid positive amount.", "INVOICE_ITEM_INVALID");
+      }
+      const description = conciseInvoiceItemDescription(item.name, item.description);
+      if (!description) {
+        throw new AppError(422, "Each invoice item needs a description of 200 characters or fewer.", "INVOICE_ITEM_INVALID");
+      }
+      const lineAmount = amount.toFixed();
+      if (!/^\d{1,15}(?:\.\d{1,8})?$/.test(lineAmount)) {
+        throw new AppError(422, "An invoice item amount exceeds the supported range.", "INVOICE_ITEM_INVALID");
+      }
+      return { description, amount: lineAmount };
+    })
+  } else if (hasSupportedCurrency && canKeepExistingItems) {
+    lineItems = currentDraft.lineItems;
+  } else if (hasSupportedCurrency && !hasItemValues && consolidationTotal) {
+    const amount = new Decimal(consolidationTotal);
+    if (!amount.isFinite() || amount.lte(0)) {
+      throw new AppError(422, "The invoice total must be a positive amount.", "INVOICE_AMOUNT_INVALID");
+    }
+    const description = consolidatedItemDescription(invoice.items, currentDraft, project);
+    const name = consolidatedItemName(project);
+    if (description) {
+      lineItems = [{
+        description: conciseInvoiceItemDescription(name, description),
+        amount: amount.toFixed(),
+      }];
+    }
+  }
+
+  const calculatedTotal = lineItems?.length && hasSupportedCurrency && currency
+    ? calculateInvoiceLineItemTotal(lineItems, currency)
+    : undefined;
+  const totalMismatch = statedTotal && calculatedTotal && currency
+    && !new Decimal(statedTotal).eq(calculatedTotal)
+    ? { currency, stated: statedTotal, calculated: calculatedTotal }
+    : undefined;
+  const services = invoice.items.length > 0
+    ? invoice.items.map((item) => conciseInvoiceItemDescription(item.name, item.description)).filter(Boolean)
+    : currentDraft.services;
+  const serviceDetails = invoice.items.map((item) =>
+    conciseInvoiceItemDescription(item.name, item.description));
+  const descriptionLines = [
+    project,
+    ...serviceDetails,
+  ].filter(Boolean);
+  const fullDescription = descriptionLines.join("\n");
+  const description = invoice.items.length === 0
+    ? currentDraft.description || project
+    : fullDescription.length <= 2000
+      ? fullDescription || currentDraft.description
+      : project || currentDraft.description;
+  const updates: InvoiceAssistantUpdates = {
+    ...(invoice.client_name?.trim() ? { client: invoice.client_name.trim() } : {}),
+    ...(invoice.client_email?.trim() ? { email: invoice.client_email.trim().toLowerCase() } : {}),
+    ...(project ? { project } : {}),
+    ...(hasSupportedCurrency && currency ? { currency } : {}),
+    ...(invoice.due_date && validDateOnly(invoice.due_date) ? { dueDate: invoice.due_date } : {}),
+    ...(services?.length ? { services } : {}),
+    ...(description ? { description } : {}),
+    ...(lineItems && calculatedTotal && !totalMismatch ? { lineItems, amount: calculatedTotal } : {}),
+    ...(!lineItems && statedTotal && !totalMismatch ? { amount: statedTotal } : {}),
+    ...(currency && currency !== currentDraft.currency && lineItems && calculatedTotal && !totalMismatch
+      ? { currencyAmountsConfirmed: true }
+      : {}),
+  };
+  if (totalMismatch && currentDraft.lineItems?.length && currencyChanged) {
+    delete updates.currency;
+  }
+  return {
+    draft: applyInvoiceUpdates(currentDraft, updates, referenceDate),
+    totalMismatch,
+    requiresAmountClarification,
+  };
 }
 
 export function applyInvoiceUpdates(
   currentDraft: InvoiceDraftContext,
-  updates: Awaited<ReturnType<typeof understandInvoiceMessage>>["updates"],
+  updates: InvoiceAssistantUpdates,
   referenceDate = new Date().toISOString().slice(0, 10),
 ) {
   if (!validDateOnly(referenceDate)) throw new AppError(422, "Invoice date is invalid.", "INVOICE_DATE_INVALID");
@@ -219,7 +437,7 @@ export function applyInvoiceUpdates(
       );
     }
     draft.amount = calculatedTotal;
-    draft.services = draft.lineItems.map((item) => item.description);
+    if (!updates.services) draft.services = draft.lineItems.map((item) => item.description);
   } else if (updates.amount && currentDraft.lineItems?.length) {
     const existingTotal = calculateInvoiceLineItemTotal(currentDraft.lineItems as InvoiceLineItem[], currentDraft.currency ?? "");
     if (!new Decimal(updates.amount).eq(existingTotal)) {
