@@ -696,6 +696,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .overdue-info { display: grid; flex: 1; gap: 3px; min-width: 0; }
 .overdue-info b { overflow: hidden; color: #4c5163; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .overdue-info small, .overdue-info span { color: #979caa; font-size: 8px; }
+.overdue-info .reminder-row-success { color: #34805c; }
+.overdue-info .reminder-row-error { color: #c14949; overflow-wrap: anywhere; }
 .reminder-note { display: flex; gap: 7px; margin-top: 8px; padding: 9px; border-radius: 7px; color: #8e83bd; background: #f8f6ff; font-size: 8px; line-height: 1.5; }
 .reminder-note svg { flex: 0 0 auto; }
 .reminder-preview-label { display: grid; gap: 5px; margin-bottom: 13px; padding: 10px; border: 1px solid #eeeef4; border-radius: 7px; background: #fbfbfd; }
